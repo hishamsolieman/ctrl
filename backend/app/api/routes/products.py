@@ -24,6 +24,7 @@ from app.services.codes import (
     code_exists,
     generate_variant_code,
     is_valid_code,
+    make_variant_code,
     normalize_code,
 )
 from app.services.logging import log_action
@@ -123,7 +124,8 @@ def _set_variant_code(db: Session, variant: ProductVariant, raw_code: str | None
             raise HTTPException(status.HTTP_409_CONFLICT, f"Code '{code}' is already in use")
         variant.code = code
     elif not variant.code:
-        variant.code = generate_variant_code(db)
+        # Auto code: composed from coding attributes' value codes (+ random suffix).
+        variant.code = make_variant_code(db, variant.attributes)
 
 
 # --------------------------------------------------------------------------- #

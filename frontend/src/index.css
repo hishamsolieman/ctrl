@@ -31,6 +31,36 @@ html[dir="rtl"] body {
   font-family: "Cairo", "Poppins", system-ui, sans-serif;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Custom scrollbars — replaces the ugly default OS scrollbar everywhere.      */
+/* -------------------------------------------------------------------------- */
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--ctrl-border)) transparent;
+}
+/* WebKit / Chromium / Edge */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--ctrl-border));
+  border-radius: 9999px;
+  /* transparent border + padding-box clip = a slim, inset thumb */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--ctrl-muted));
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 @layer components {
   .ctrl-input {
     @apply w-full rounded-lg bg-elevated border border-border px-4 py-3 text-text
@@ -63,6 +93,19 @@ html[dir="rtl"] body {
     @apply h-4 w-4 shrink-0 cursor-pointer rounded border-border bg-elevated
            accent-accent;
   }
+
+  /* Native <select> with a custom chevron inset from the edge (not flush). */
+  .ctrl-select {
+    @apply appearance-none bg-no-repeat pe-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239a9a9a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-size: 15px 15px;
+  }
+}
+
+/* Mirror the select chevron to the inline-start edge in RTL. */
+html[dir="rtl"] .ctrl-select {
+  background-position: left 0.75rem center;
 }
 
 /* Dual-thumb range slider (price filter). Track is drawn by the component;

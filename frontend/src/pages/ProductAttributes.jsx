@@ -1,196 +1,271 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
+import { listAttributes, deleteAttribute } from "@/lib/products";
+import AttributeModal from "@/components/attributes/AttributeModal";
+import AttributeViewModal from "@/components/attributes/AttributeViewModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import {
-  listAttributes,
-  createAttribute,
-  updateAttribute,
-  deleteAttribute,
-} from "@/lib/products";
-import { IconPlus, IconTrash, IconX, IconSliders } from "@/components/icons";
+  IconPlus,
+  IconSearch,
+  IconSliders,
+  IconEye,
+  IconEdit,
+  IconCopy,
+  IconTrash,
+  IconChevronLeft,
+  IconChevronRight,
+} from "@/components/icons";
 
-let _k = 1;
-const key = () => `a${_k++}`;
+const PAGE_SIZE = 8;
 
-function toLocal(attrs) {
-  return (attrs || []).map((a) => ({
-    key: key(),
-    id: a.id,
-    attrKey: a.key,
-    name_en: a.name_en,
-    name_ar: a.name_ar,
-    values: a.values.map((v) => ({
-      key: key(),
-      id: v.id,
-      value_en: v.value_en,
-      value_ar: v.value_ar,
-      hex: v.extra?.hex || "",
-    })),
-  }));
+function Badge({ children, tone = "muted" }) {
+  const tones = {
+    muted: "border-border bg-elevated text-muted",
+    accent: "border-accent/40 bg-accent/10 text-accent",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${tones[tone]}`}>
+      {children}
+    </span>
+  );
 }
 
 export default function ProductAttributes() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isAr = i18n.resolvedLanguage === "ar";
   const toast = useToast();
-  const [list, setList] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState(null);
 
-  const load = () => listAttributes().then((a) => setList(toLocal(a))).catch(() => {});
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [modal, setModal] = useState({ open: false, mode: "add", attribute: null });
+  const [viewing, setViewing] = useState(null);
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await listAttributes());
+    } catch {
+      toast.error(t("auth.genericError"));
+    } finally {
+      setLoading(false);
+    }
+  }, [t, toast]);
+
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
-  const inputCls = "ctrl-input-sm w-full text-sm";
-
-  const patchAttr = (k, patch) => setList((l) => l.map((a) => (a.key === k ? { ...a, ...patch } : a)));
-  const addAttr = () =>
-    setList((l) => [...l, { key: key(), id: null, attrKey: "", name_en: "", name_ar: "", values: [] }]);
-  const addValue = (ak) =>
-    setList((l) =>
-      l.map((a) =>
-        a.key === ak
-          ? { ...a, values: [...a.values, { key: key(), id: null, value_en: "", value_ar: "", hex: "" }] }
-          : a
-      )
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter((a) =>
+      [a.name_en, a.name_ar, a.key, ...(a.values || []).flatMap((v) => [v.value_en, v.value_ar])]
+        .some((v) => (v || "").toLowerCase().includes(s))
     );
-  const patchValue = (ak, vk, patch) =>
-    setList((l) =>
-      l.map((a) =>
-        a.key === ak ? { ...a, values: a.values.map((v) => (v.key === vk ? { ...v, ...patch } : v)) } : a
-      )
-    );
-  const removeValue = (ak, vk) =>
-    setList((l) => l.map((a) => (a.key === ak ? { ...a, values: a.values.filter((v) => v.key !== vk) } : a)));
+  }, [items, q]);
 
-  async function onDeleteAttr(a) {
-    if (pendingDelete !== a.key) {
-      setPendingDelete(a.key);
-      return;
-    }
-    if (a.id) {
-      try {
-        await deleteAttribute(a.id);
-        toast.success(t("products.attrs.deleted"));
-      } catch (err) {
-        toast.error(err?.response?.data?.detail || t("auth.genericError"));
-        return;
-      }
-    }
-    setList((l) => l.filter((x) => x.key !== a.key));
-    setPendingDelete(null);
-  }
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageItems = useMemo(
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filtered, page]
+  );
+  useEffect(() => { setPage(1); }, [q]);
+  useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
 
-  async function save() {
-    setSaving(true);
+  const openAdd = () => setModal({ open: true, mode: "add", attribute: null });
+  const openEdit = (a) => setModal({ open: true, mode: "edit", attribute: a });
+  const openCopy = (a) => setModal({ open: true, mode: "copy", attribute: a });
+
+  async function confirmDelete() {
+    if (!toDelete) return;
+    setDeleting(true);
     try {
-      for (const a of list) {
-        if (!a.attrKey.trim() || !a.name_en.trim() || !a.name_ar.trim()) continue;
-        const payload = {
-          key: a.attrKey.trim(),
-          name_en: a.name_en.trim(),
-          name_ar: a.name_ar.trim(),
-          values: a.values
-            .filter((v) => v.value_en.trim() && v.value_ar.trim())
-            .map((v) => ({
-              ...(v.id ? { id: v.id } : {}),
-              value_en: v.value_en.trim(),
-              value_ar: v.value_ar.trim(),
-              extra: v.hex ? { hex: v.hex } : null,
-            })),
-        };
-        if (a.id) await updateAttribute(a.id, payload);
-        else await createAttribute(payload);
-      }
-      toast.success(t("products.attrs.saved"));
+      await deleteAttribute(toDelete.id);
+      toast.success(t("products.attrs.deleted"));
+      setToDelete(null);
       load();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || t("auth.genericError"));
+      const d = err?.response?.data?.detail;
+      toast.error(d ? t(d, { defaultValue: d }) : t("auth.genericError"));
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
+  }
+
+  const iconBtn =
+    "flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text transition hover:border-accent hover:text-accent";
+
+  function ValuePreview({ a }) {
+    const vals = a.values || [];
+    if (vals.length === 0) return <span className="text-xs text-muted">—</span>;
+    const shown = vals.slice(0, 4);
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {shown.map((v) => (
+          <span key={v.id}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-elevated px-1.5 py-0.5 text-xs text-text">
+            {a.type === "color" && v.extra?.hex && (
+              <span className="h-3 w-3 rounded-full border border-white/20" style={{ backgroundColor: v.extra.hex }} />
+            )}
+            {isAr ? v.value_ar : v.value_en}
+          </span>
+        ))}
+        {vals.length > shown.length && (
+          <span className="text-xs text-muted">+{vals.length - shown.length}</span>
+        )}
+      </div>
+    );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
+      {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-text">{t("products.attrs.title")}</h1>
           <p className="text-sm text-muted">{t("products.attrs.subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={addAttr}
-            className="ctrl-btn border border-border px-3 py-2 text-sm text-text hover:bg-elevated">
-            <IconPlus width={16} height={16} /> {t("products.attrs.addAttribute")}
-          </button>
-          <button onClick={save} disabled={saving}
-            className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95">
-            {saving ? t("products.attrs.saving") : t("products.attrs.save")}
-          </button>
-        </div>
+        <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
+          <IconPlus width={16} height={16} /> {t("products.attrs.add")}
+        </button>
       </div>
 
-      <div className="ctrl-card min-h-0 flex-1 overflow-y-auto p-4">
-        {list.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
-            <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-elevated text-muted">
-              <IconSliders width={28} height={28} />
-            </span>
-            <p className="text-sm text-muted">{t("products.attrs.empty")}</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {list.map((a) => {
-              const isColor = a.attrKey.toLowerCase().includes("color") || a.values.some((v) => v.hex);
-              return (
-                <div key={a.key} className="rounded-xl border border-border p-3">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
-                    <input className={inputCls} placeholder={t("products.attrs.key")}
-                      value={a.attrKey} onChange={(e) => patchAttr(a.key, { attrKey: e.target.value })} />
-                    <input className={inputCls} placeholder={t("products.attrs.nameEn")}
-                      value={a.name_en} onChange={(e) => patchAttr(a.key, { name_en: e.target.value })} />
-                    <input className={inputCls} placeholder={t("products.attrs.nameAr")}
-                      value={a.name_ar} onChange={(e) => patchAttr(a.key, { name_ar: e.target.value })} />
-                    <button type="button" onClick={() => onDeleteAttr(a)}
-                      className={`ctrl-btn justify-center border px-2 py-2 text-sm ${
-                        pendingDelete === a.key
-                          ? "border-red-500 bg-red-500 text-white"
-                          : "border-border text-red-400 hover:bg-red-500/10"
-                      }`}>
-                      <IconTrash width={15} height={15} />
-                    </button>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    <p className="text-xs font-medium text-muted">{t("products.attrs.values")}</p>
-                    {a.values.map((v) => (
-                      <div key={v.key} className="flex flex-wrap items-center gap-2">
-                        <input className="ctrl-input-sm w-32 text-sm" placeholder={t("products.attrs.valueEn")}
-                          value={v.value_en} onChange={(e) => patchValue(a.key, v.key, { value_en: e.target.value })} />
-                        <input className="ctrl-input-sm w-32 text-sm" placeholder={t("products.attrs.valueAr")}
-                          value={v.value_ar} onChange={(e) => patchValue(a.key, v.key, { value_ar: e.target.value })} />
-                        {isColor && (
-                          <input type="color" title={t("products.attrs.colorHex")}
-                            className="h-9 w-9 cursor-pointer rounded border border-border bg-transparent"
-                            value={v.hex || "#8eff19"}
-                            onChange={(e) => patchValue(a.key, v.key, { hex: e.target.value })} />
-                        )}
-                        <button type="button" onClick={() => removeValue(a.key, v.key)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-elevated hover:text-red-400">
-                          <IconX width={14} height={14} />
+      {/* Search */}
+      <div className="relative">
+        <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-muted">
+          <IconSearch width={18} height={18} />
+        </span>
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder={t("products.attrs.search")} className="ctrl-input py-2.5 ps-10" />
+      </div>
+
+      {/* Table */}
+      <div className="ctrl-card flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-auto">
+          {loading ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded-lg bg-elevated" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-4 py-16 text-center">
+              <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-elevated text-muted">
+                <IconSliders width={30} height={30} />
+              </span>
+              <div>
+                <p className="text-lg font-semibold text-text">{t("products.attrs.empty")}</p>
+                <p className="mt-1 text-sm text-muted">{t("products.attrs.emptyBody")}</p>
+              </div>
+              <button onClick={openAdd} className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95">
+                <IconPlus width={16} height={16} /> {t("products.attrs.add")}
+              </button>
+            </div>
+          ) : (
+            <table className="w-full border-collapse text-sm">
+              <thead className="sticky top-0 z-10 bg-surface">
+                <tr className="border-b border-border text-start text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.name")}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.type")}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.values")}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.mandatory")}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.coding")}</th>
+                  <th className="px-4 py-3 text-end font-medium">{t("products.attrs.col.actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.map((a) => (
+                  <tr key={a.id} className="border-b border-border/60 transition hover:bg-elevated/40">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <div className="font-medium text-text">{isAr ? a.name_ar : a.name_en}</div>
+                          <div className="text-xs text-muted">{isAr ? a.name_en : a.name_ar}</div>
+                        </div>
+                        {a.in_use && <Badge tone="accent">{t("products.attrs.inUse")}</Badge>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone="accent">{t(`products.attrs.type.${a.type}`)}</Badge>
+                    </td>
+                    <td className="px-4 py-3"><ValuePreview a={a} /></td>
+                    <td className="px-4 py-3">
+                      <Badge tone={a.is_required ? "accent" : "muted"}>
+                        {a.is_required ? t("products.attrs.yes") : t("products.attrs.no")}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone={a.coding ? "accent" : "muted"}>
+                        {a.coding ? t("products.attrs.yes") : t("products.attrs.no")}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <button title={t("products.attrs.view")} className={iconBtn} onClick={() => setViewing(a)}>
+                          <IconEye width={15} height={15} />
+                        </button>
+                        <button title={t("products.attrs.edit")} className={iconBtn} onClick={() => openEdit(a)}>
+                          <IconEdit width={15} height={15} />
+                        </button>
+                        <button title={t("products.attrs.copy")} className={iconBtn} onClick={() => openCopy(a)}>
+                          <IconCopy width={15} height={15} />
+                        </button>
+                        <button title={t("products.attrs.delete")}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/40 text-red-400 transition hover:bg-red-500 hover:text-white"
+                          onClick={() => setToDelete(a)}>
+                          <IconTrash width={15} height={15} />
                         </button>
                       </div>
-                    ))}
-                    <button type="button" onClick={() => addValue(a.key)}
-                      className="flex items-center gap-1 text-xs font-medium text-accent hover:underline">
-                      <IconPlus width={13} height={13} /> {t("products.attrs.addValue")}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {!loading && filtered.length > 0 && pageCount > 1 && (
+          <div className="flex items-center justify-between border-t border-border px-4 py-3">
+            <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="ctrl-btn border border-border px-3 py-1.5 text-sm text-text hover:bg-elevated disabled:opacity-40">
+              {isAr ? <IconChevronRight width={16} height={16} /> : <IconChevronLeft width={16} height={16} />}
+              {t("products.pagination.prev")}
+            </button>
+            <span className="text-sm text-muted">{t("products.pagination.pageOf", { page, pages: pageCount })}</span>
+            <button disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              className="ctrl-btn border border-border px-3 py-1.5 text-sm text-text hover:bg-elevated disabled:opacity-40">
+              {t("products.pagination.next")}
+              {isAr ? <IconChevronLeft width={16} height={16} /> : <IconChevronRight width={16} height={16} />}
+            </button>
           </div>
         )}
       </div>
+
+      {/* Modals */}
+      <AttributeModal
+        open={modal.open}
+        mode={modal.mode}
+        initial={modal.attribute}
+        onClose={() => setModal((m) => ({ ...m, open: false }))}
+        onSaved={load}
+      />
+      <AttributeViewModal open={!!viewing} attribute={viewing} onClose={() => setViewing(null)} />
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={confirmDelete}
+        loading={deleting}
+        title={t("products.attrs.confirmDelete.title")}
+        body={t("products.attrs.confirmDelete.body", { name: toDelete ? (isAr ? toDelete.name_ar : toDelete.name_en) : "" })}
+        confirmLabel={t("products.attrs.confirmDelete.confirm")}
+        cancelLabel={t("products.attrs.confirmDelete.cancel")}
+      />
     </div>
   );
 }

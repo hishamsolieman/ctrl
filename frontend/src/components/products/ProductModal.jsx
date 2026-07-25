@@ -173,6 +173,15 @@ export default function ProductModal({
         return;
       }
     }
+    // Every required attribute must have a value selected on every variant.
+    const requiredAttrs = (attributes || []).filter((a) => a.is_required);
+    for (const a of requiredAttrs) {
+      const missing = form.variants.some((v) => !v.attributes[String(a.id)]);
+      if (missing) {
+        toast.error(t("products.modal.requiredAttr", { name: isAr ? a.name_ar : a.name_en }));
+        return;
+      }
+    }
 
     const payload = {
       name: form.name.trim(),
@@ -238,7 +247,7 @@ export default function ProductModal({
         </div>
         <div>
           <label className={labelCls}>{t("products.modal.category")}</label>
-          <select className={inputCls} value={form.category_id}
+          <select className={`${inputCls} ctrl-select`} value={form.category_id}
             onChange={(e) => set("category_id", e.target.value)}>
             <option value="">{t("products.modal.selectCategory")}</option>
             {categories.map((c) => (
@@ -248,7 +257,7 @@ export default function ProductModal({
         </div>
         <div>
           <label className={labelCls}>{t("products.modal.supplier")}</label>
-          <select className={inputCls} value={form.supplier_id}
+          <select className={`${inputCls} ctrl-select`} value={form.supplier_id}
             onChange={(e) => set("supplier_id", e.target.value)}>
             <option value="">{t("products.modal.selectSupplier")}</option>
             {suppliers.map((s) => (
@@ -345,21 +354,36 @@ export default function ProductModal({
                     onChange={(e) => updateVariant(v.key, { code: e.target.value })} />
                 </div>
                 {/* Attribute selects */}
-                {attributes.map((attr) => (
-                  <div key={attr.id}>
-                    <label className={labelCls}>{isAr ? attr.name_ar : attr.name_en}</label>
-                    <select className={inputCls}
-                      value={v.attributes[String(attr.id)] || ""}
-                      onChange={(e) => setVariantAttr(v.key, attr.id, e.target.value)}>
-                      <option value="">{t("products.modal.selectValue")}</option>
-                      {attr.values.map((val) => (
-                        <option key={val.id} value={val.id}>
-                          {isAr ? val.value_ar : val.value_en}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
+                {attributes.map((attr) => {
+                  const selId = v.attributes[String(attr.id)];
+                  const selVal = attr.values.find((x) => x.id === Number(selId));
+                  return (
+                    <div key={attr.id}>
+                      <label className={labelCls}>
+                        {isAr ? attr.name_ar : attr.name_en}
+                        {attr.is_required && <span className="text-accent"> *</span>}
+                      </label>
+                      <div className="relative">
+                        {attr.type === "color" && selVal?.extra?.hex && (
+                          <span className="pointer-events-none absolute inset-y-0 start-2.5 flex items-center">
+                            <span className="h-4 w-4 rounded-full border border-white/20"
+                              style={{ backgroundColor: selVal.extra.hex }} />
+                          </span>
+                        )}
+                        <select className={`${inputCls} ctrl-select ${attr.type === "color" && selVal?.extra?.hex ? "ps-9" : ""}`}
+                          value={selId || ""}
+                          onChange={(e) => setVariantAttr(v.key, attr.id, e.target.value)}>
+                          <option value="">{t("products.modal.selectValue")}</option>
+                          {attr.values.map((val) => (
+                            <option key={val.id} value={val.id}>
+                              {isAr ? val.value_ar : val.value_en}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Variant images */}
