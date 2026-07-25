@@ -1,0 +1,26 @@
+---
+description: Action logging requirement for every action
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Action Logging
+
+Every meaningful action (login, create/update/delete, role changes, etc.) **must** be recorded in the `action_logs` table.
+
+Use the helper `services.logging.log_action(...)` rather than writing rows manually.
+
+A log row captures:
+- `user_id` (nullable for anonymous/failed attempts)
+- `action` — short machine key, e.g. `auth.login`, `product.create`
+- `entity` / `entity_id` — what was affected (nullable)
+- `details` — JSON with contextual data (never include passwords/secrets)
+- `ip_address`, `user_agent`
+- `status` — `success` | `failure`
+- `created_at`
+
+```python
+log_action(db, user_id=user.id, action="auth.login", status="success", request=request)
+```
+
+Logging failures must never break the primary request path; wrap in try/except and continue.

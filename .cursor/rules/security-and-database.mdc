@@ -1,0 +1,29 @@
+---
+description: Database access & AES-256 encrypted credentials
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Security & Database
+
+## AES-256 encrypted DB credentials
+- **No plaintext DB credentials** anywhere. The root `.env` stores each value encrypted as `DB_HOST_ENC`, `DB_PORT_ENC`, `DB_USER_ENC`, `DB_PASSWORD_ENC`, `DB_NAME_ENC`.
+- A **fixed 32-byte AES-256 key lives in the backend** (`backend/app/core/crypto.py`). It decrypts the `_ENC` values at startup to build the DB connection.
+- Use `crypto.encrypt(value)` / `crypto.decrypt(token)`. Format: AES-256-GCM, output base64 of `nonce || ciphertext || tag`.
+- To add/rotate a credential, run `python -m app.core.crypto encrypt "value"` and paste the token into `.env`.
+
+```python
+from app.core.crypto import decrypt
+DB_HOST = decrypt(os.environ["DB_HOST_ENC"])
+```
+
+## Passwords
+Hash with bcrypt only. Never log or return password hashes.
+
+## Roles & seed SuperAdmin
+Permissions are role-based: `Cashier` < `Moderator` < `Admin` < `SuperAdmin`. Guard endpoints with a role dependency; higher roles inherit lower privileges.
+
+The seed SuperAdmin lives in `database/db.sql` with a **bcrypt-hashed** password (not in `.env`). `database/init_db.py` creates tables from the SQLAlchemy models, then applies the idempotent `INSERT IGNORE` seeds from `db.sql`.
+
+## DB-configurable settings
+Runtime app settings (e.g. `brand_name`, `brand_motto`) live in the `settings` key/value table, exposed via `GET/PUT /brand`.

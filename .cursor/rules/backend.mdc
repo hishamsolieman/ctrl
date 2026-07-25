@@ -1,0 +1,27 @@
+---
+description: FastAPI backend conventions (auth, security, structure)
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend (FastAPI)
+
+## Structure
+`backend/app/` → `core/` (config, crypto, security, database), `models/`, `schemas/`, `api/routes/`, `services/`. Entrypoint: `backend/run.py` reads `BACKEND_HOST`/`BACKEND_PORT` from root `.env`.
+
+## Auth & tokens
+- Passwords hashed with **bcrypt** (`passlib[bcrypt]`). Never store or return plaintext passwords.
+- Login is **username + password**. On success, return **only** a JWT access token — nothing else.
+- Tokens **expire in 1 year** and are required (via `Authorization: Bearer`) for every non-auth action.
+- **Auth/JWT config (secret, algorithm, expiry) is embedded in `app/core/security.py`**, not in `.env` — same principle as the AES key.
+
+## Conventions
+- All DB access through SQLAlchemy sessions from `core/database.py`; the engine is built from **AES-256-decrypted** credentials.
+- Every state-changing endpoint records an action log (see `action-logging` rule).
+- Endpoints accept `Accept-Language` and return localized messages where relevant.
+- Validate all input with Pydantic schemas. Return consistent error shapes.
+
+```python
+# ✅ login returns ONLY the token
+return {"access_token": token, "token_type": "bearer"}
+```

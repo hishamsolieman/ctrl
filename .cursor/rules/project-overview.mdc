@@ -1,0 +1,39 @@
+---
+description: CTRL project overview, stack, and structure
+alwaysApply: true
+---
+
+# CTRL — Project Overview
+
+CTRL is a POS/admin platform. Brand vibe: **black background, white text, green accent `#8EFF19`**, minimal and focused. Brand name is `CTRL`, motto `Stay in CTRL.` (both configurable via the root `.env`).
+
+## Stack
+- **Frontend**: React (Vite) + TailwindCSS, in `frontend/`
+- **Backend**: FastAPI (Python), in `backend/`, runs on port `2830` (configurable via `.env`)
+- **Database**: MySQL / MariaDB (XAMPP), schema in `database/`
+
+## Configuration
+Most configuration lives in the **root `/.env`**:
+- Theme colors (`VITE_THEME_*`)
+- Frontend API base URL (`VITE_API_BASE_URL`)
+- Backend host/port (`BACKEND_HOST`, `BACKEND_PORT`)
+- **All DB connection info, stored AES-256 encrypted** (`DB_*_ENC`)
+- `VITE_BRAND_*` — bootstrap **fallback** only.
+
+Two things are intentionally NOT in `.env`:
+- **Brand name & motto** are stored in the DB `settings` table (`brand_name`, `brand_motto`), editable at runtime via `GET/PUT /brand`. The frontend fetches them through `BrandContext`.
+- **Auth/JWT config** is embedded in `backend/app/core/security.py` (like the AES key), never in `.env`.
+
+Vite is configured with `envDir: '../'` so the frontend reads the root `.env`. The backend loads the root `.env` via `python-dotenv`.
+
+## Design & template references (read-only)
+- `ref/design/` — brand look/feel (CTRL wordmark, green `#8EFF19` accent, dark theme).
+- `ref/template/` — Reback admin template. Reuse layouts/pages (e.g. `SignIn2`) but re-implement them in React + Tailwind, adapted to the CTRL theme. Never ship template files directly.
+
+## Roles (ascending privilege)
+`Cashier` < `Moderator` < `Admin` < `SuperAdmin`. The seed SuperAdmin (`admin` / `Oselfasads@eshta`) is defined — bcrypt-hashed — in `database/db.sql`, not in `.env`.
+
+## Non-negotiables
+- Every meaningful action is logged (see `action-logging` rule).
+- The app is bilingual **English + Arabic** with full RTL support, extensible to more languages (see `i18n` rule).
+- Keep everything **modular and reusable**; brand/logo/colors must stay configurable.

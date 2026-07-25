@@ -1,0 +1,25 @@
+---
+description: React + Tailwind frontend conventions (theme, i18n, RTL, modularity)
+globs: frontend/**/*.{jsx,tsx,js,ts,css}
+alwaysApply: false
+---
+
+# Frontend (React + Tailwind)
+
+## Theme & brand (configurable)
+- Colors come from the root `.env` (`VITE_THEME_BG`, `VITE_THEME_SURFACE`, `VITE_THEME_TEXT`, `VITE_THEME_ACCENT`) and are exposed as CSS variables + Tailwind tokens. Default dark theme: bg `#000000`, text `#ffffff`, accent `#8EFF19`.
+- Never hardcode brand strings. Read brand name/motto from `src/config/brand.js` (backed by `VITE_BRAND_NAME`, `VITE_BRAND_MOTTO`).
+- Logo is a single configurable PNG at `src/assets/logo.png`, referenced via `src/config/brand.js`. Swapping the file changes the logo everywhere.
+
+## Structure & reuse
+- Modular: shared UI in `src/components/`, pages in `src/pages/`, layouts in `src/components/layout/`.
+- Reuse the Reback template's look (adapted to CTRL dark theme) — re-implement pages like `SignIn2` in React, don't copy Blazor files.
+- Auth token stored client-side and attached as `Authorization: Bearer` on every API call via `src/lib/api.js`.
+
+## i18n & RTL
+- Use `react-i18next`. Locales in `src/i18n/locales/{en,ar}.json`. All user-facing text goes through `t()`.
+- When language is Arabic, set `dir="rtl"` on `<html>` and ensure components mirror correctly (use logical spacing utilities / `rtl:` variants). Adding a new language = adding a locale file.
+
+## UX
+- Show the `Preloader` on initial load / route auth checks.
+- Protect routes: unauthenticated users are redirected to `/login`; authenticated land on `/dashboard`.
