@@ -7,43 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_role
 from app.core.database import get_db
-from app.models.category import Category
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.services.logging import log_action
 from app.services.settings import CURRENCY_KEY, get_currency, set_setting
 
 router = APIRouter(tags=["catalog"])
-
-
-# ------------------------------ Categories -------------------------------- #
-class CategoryIn(BaseModel):
-    name_en: str = Field(min_length=1, max_length=120)
-    name_ar: str = Field(min_length=1, max_length=120)
-
-
-@router.get("/categories")
-def list_categories(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
-    rows = db.query(Category).filter(Category.is_active.is_(True)).order_by(Category.id).all()
-    return [
-        {"id": c.id, "name_en": c.name_en, "name_ar": c.name_ar} for c in rows
-    ]
-
-
-@router.post("/categories", status_code=status.HTTP_201_CREATED)
-def create_category(
-    payload: CategoryIn,
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
-):
-    cat = Category(name_en=payload.name_en, name_ar=payload.name_ar, is_active=True)
-    db.add(cat)
-    db.commit()
-    db.refresh(cat)
-    log_action(db, action="category.create", user_id=user.id, entity="category",
-               entity_id=cat.id, request=request)
-    return {"id": cat.id, "name_en": cat.name_en, "name_ar": cat.name_ar}
 
 
 # ------------------------------ Suppliers --------------------------------- #

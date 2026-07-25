@@ -2,13 +2,11 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 
-// NOTE: The DB `translations` table is the source of truth for UI strings
-// (see backend /i18n/{locale}). These bundled JSON files are only a bootstrap
-// fallback so the very first paint works before/if the API is unavailable.
-import en from "./locales/en.json";
-import ar from "./locales/ar.json";
+// The DB `translations` table (namespace 'ui', served by GET /i18n/{locale}) is
+// the ONLY source of UI strings. There are no bundled en.json/ar.json files;
+// `loadDbTranslations()` fetches everything at boot (see main.jsx).
 
-// Languages configured here. Adding a new language = add a locale file + entry.
+// Languages configured here. Adding a new language = add an entry (strings live in the DB).
 export const LANGUAGES = [
   { code: "en", label: "English", dir: "ltr" },
   { code: "ar", label: "العربية", dir: "rtl" },
@@ -33,10 +31,9 @@ i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    resources: {
-      en: { translation: en },
-      ar: { translation: ar },
-    },
+    // Resources are empty at init; they are populated from the DB in
+    // loadDbTranslations() before the app renders.
+    resources: {},
     fallbackLng: "en",
     supportedLngs: LANGUAGES.map((l) => l.code),
     interpolation: { escapeValue: false },
@@ -65,7 +62,7 @@ function unflatten(flat) {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:2830";
 
-// Load UI translations from the DB and override the bundled fallback.
+// Load all UI translations from the DB (the single source of truth).
 export async function loadDbTranslations(locales = LANGUAGES.map((l) => l.code)) {
   await Promise.all(
     locales.map(async (lng) => {
@@ -78,7 +75,7 @@ export async function loadDbTranslations(locales = LANGUAGES.map((l) => l.code))
           i18n.addResourceBundle(lng, "translation", unflatten(ui), true, true);
         }
       } catch {
-        /* keep bundled fallback */
+        /* network/API error: keys render raw until the API is reachable */
       }
     })
   );

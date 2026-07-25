@@ -7,6 +7,8 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Products from "@/pages/Products";
+import ProductCategories from "@/pages/ProductCategories";
+import ProductAttributes from "@/pages/ProductAttributes";
 import Preloader from "@/components/Preloader";
 
 // Redirect authenticated users away from /login.
@@ -34,6 +36,8 @@ export default function App() {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/products/categories" element={<ProductCategories />} />
+            <Route path="/products/attributes" element={<ProductAttributes />} />
           </Route>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

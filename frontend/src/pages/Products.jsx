@@ -14,7 +14,6 @@ import FilterRail from "@/components/products/FilterRail";
 import ProductCard from "@/components/products/ProductCard";
 import ProductModal from "@/components/products/ProductModal";
 import ProductViewModal from "@/components/products/ProductViewModal";
-import AttributeManager from "@/components/products/AttributeManager";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   IconBox,
@@ -24,7 +23,6 @@ import {
   IconPlus,
   IconX,
   IconFilter,
-  IconSliders,
   IconChevronLeft,
   IconChevronRight,
 } from "@/components/icons";
@@ -75,7 +73,6 @@ export default function Products() {
 
   const [modal, setModal] = useState({ open: false, mode: "add", product: null });
   const [viewing, setViewing] = useState(null);
-  const [attrsOpen, setAttrsOpen] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -189,9 +186,6 @@ export default function Products() {
           <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={onImport} />
           <button onClick={resetFilters} className={toolbarBtn}>
             <IconX width={16} height={16} /> {t("products.clearAll")}
-          </button>
-          <button onClick={() => setAttrsOpen(true)} className={toolbarBtn}>
-            <IconSliders width={16} height={16} /> {t("products.manageAttributes")}
           </button>
           <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
             <IconPlus width={16} height={16} /> {t("products.addProduct")}
@@ -323,13 +317,6 @@ export default function Products() {
         attributes={attributes}
         currency={currency}
         onClose={() => setViewing(null)}
-      />
-
-      <AttributeManager
-        open={attrsOpen}
-        attributes={attributes}
-        onClose={() => setAttrsOpen(false)}
-        onSaved={loadRefData}
       />
 
       <ConfirmDialog

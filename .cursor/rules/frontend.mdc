@@ -17,8 +17,13 @@ alwaysApply: false
 - Auth token stored client-side and attached as `Authorization: Bearer` on every API call via `src/lib/api.js`.
 
 ## i18n & RTL
-- Use `react-i18next`. Locales in `src/i18n/locales/{en,ar}.json`. All user-facing text goes through `t()`.
-- When language is Arabic, set `dir="rtl"` on `<html>` and ensure components mirror correctly (use logical spacing utilities / `rtl:` variants). Adding a new language = adding a locale file.
+- **Translations live ONLY in the database** (`translations` table, namespace `ui`), served by `GET /i18n/{locale}` and loaded at boot via `loadDbTranslations()` in `src/i18n/index.js`. There are **NO `en.json` / `ar.json` files** — never (re)create them or import bundled locale JSON.
+- To add/change a UI string: insert/update the row in the DB. For fresh installs, also add it to the `translations` seed in `database/db.sql` (the DB is the source of truth). All keys still go through `t()` with dotted keys (e.g. `categories.errors.nameEnTaken`).
+- Backend validation errors should return the i18n **key** as the `detail`; the frontend translates it with `t(detail, { defaultValue: detail })`.
+- When language is Arabic, set `dir="rtl"` on `<html>` and ensure components mirror correctly (use logical spacing utilities / `rtl:` variants). Adding a new language = add an entry to `LANGUAGES` and seed its rows in the DB.
+
+## Data ordering
+- List/retrieval endpoints return records in **ascending alphabetical (A–Z) order by name** by default (e.g. categories by `name_en`, suppliers by `name`), unless the feature exposes an explicit sort control (e.g. the products list) or a deliberate admin-defined `sort_order` (e.g. attributes).
 
 ## UX
 - Show the `Preloader` on initial load / route auth checks.

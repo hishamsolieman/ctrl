@@ -57,6 +57,9 @@ def _serialize(product: Product) -> dict[str, Any]:
     images: list[dict] = []
     for v in variants:
         images.extend({"id": img.id, "url": img.url} for img in v.images)
+    # Fallback: if the product has no images, use its category's image.
+    if not images and product.category and product.category.image_id:
+        images = [{"id": 0, "url": f"/images/{product.category.image_id}"}]
     return {
         "id": product.id,
         "name": product.name,

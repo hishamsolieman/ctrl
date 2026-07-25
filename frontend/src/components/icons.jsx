@@ -167,3 +167,16 @@ export const IconSliders = (p) => (
     <path d="M1 14h6M9 8h6M17 16h6" />
   </svg>
 );
+
+export const IconList = (p) => (
+  <svg {...base} {...p}>
+    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+  </svg>
+);
+
+export const IconTag = (p) => (
+  <svg {...base} {...p}>
+    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+    <path d="M7 7h.01" />
+  </svg>
+);

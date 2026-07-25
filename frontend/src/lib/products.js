@@ -44,6 +44,16 @@ export async function uploadProductImage(file) {
   return data.url;
 }
 
+// Uploads an image into the DB (base64) and returns its "/images/{id}" reference.
+export async function uploadImage(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/images", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data.url;
+}
+
 export async function importProducts(file) {
   const form = new FormData();
   form.append("file", file);
@@ -65,14 +75,63 @@ export async function exportProducts() {
   URL.revokeObjectURL(url);
 }
 
-// ---- Catalog ----
+// ---- Categories ----
 export async function listCategories() {
   const { data } = await api.get("/categories");
   return data;
 }
 
+export async function getCategory(id) {
+  const { data } = await api.get(`/categories/${id}`);
+  return data;
+}
+
 export async function createCategory(payload) {
   const { data } = await api.post("/categories", payload);
+  return data;
+}
+
+export async function updateCategory(id, payload) {
+  const { data } = await api.put(`/categories/${id}`, payload);
+  return data;
+}
+
+export async function deleteCategory(id) {
+  const { data } = await api.delete(`/categories/${id}`);
+  return data;
+}
+
+export async function bulkUpdateCategories(payload) {
+  const { data } = await api.post("/categories/bulk-update", payload);
+  return data;
+}
+
+export async function bulkDeleteCategories(ids) {
+  const { data } = await api.post("/categories/bulk-delete", { ids });
+  return data;
+}
+
+export async function exportCategories(q) {
+  const res = await api.get("/categories/export/csv", {
+    responseType: "blob",
+    params: q ? { q } : undefined,
+  });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "categories.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function importCategories(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/categories/import/csv", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
   return data;
 }
 
