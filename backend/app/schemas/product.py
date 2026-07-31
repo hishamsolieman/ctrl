@@ -22,6 +22,7 @@ class VariantInput(BaseModel):
 
 
 class ProductInput(BaseModel):
+    code: str | None = None  # blank -> auto-generated (8-char alphanumeric)
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     category_id: int | None = None
@@ -31,6 +32,8 @@ class ProductInput(BaseModel):
     price: float = 0
     note: str | None = None
     tags: list[str] | None = None
+    # Global (non-coding) attribute selections: {attribute_id: attribute_value_id}
+    attributes: dict[str, int] | None = None
     variants: list[VariantInput] = Field(default_factory=list)
 
     @field_validator("variants")
@@ -56,6 +59,7 @@ class VariantOut(BaseModel):
 
 class ProductOut(BaseModel):
     id: int
+    code: str
     name: str
     description: str | None
     category_id: int | None
@@ -68,6 +72,7 @@ class ProductOut(BaseModel):
     price: float
     note: str | None
     tags: list[str] | None
+    attributes: dict[str, int] | None
     variants: list[VariantOut]
     images: list[ImageOut]  # aggregated across variants (for the card carousel)
     created_at: datetime

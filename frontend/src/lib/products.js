@@ -20,6 +20,14 @@ export async function getProduct(id) {
   return data;
 }
 
+// Warns (does not block) when another product already uses this exact name.
+export async function checkProductName(name, excludeId) {
+  const { data } = await api.get("/products/check-name", {
+    params: { name, ...(excludeId ? { exclude_id: excludeId } : {}) },
+  });
+  return data.exists;
+}
+
 export async function createProduct(payload) {
   const { data } = await api.post("/products", payload);
   return data;
@@ -32,6 +40,12 @@ export async function updateProduct(id, payload) {
 
 export async function deleteProduct(id) {
   const { data } = await api.delete(`/products/${id}`);
+  return data;
+}
+
+// Soft-deletes every product (empties the store).
+export async function clearAllProducts() {
+  const { data } = await api.post("/products/clear-all");
   return data;
 }
 
@@ -168,5 +182,29 @@ export async function updateAttribute(id, payload) {
 
 export async function deleteAttribute(id) {
   const { data } = await api.delete(`/attributes/${id}`);
+  return data;
+}
+
+export async function exportAttributes(q) {
+  const res = await api.get("/attributes/export/csv", {
+    responseType: "blob",
+    params: q ? { q } : undefined,
+  });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "attributes.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function importAttributes(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/attributes/import/csv", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
   return data;
 }

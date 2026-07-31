@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,20 +13,26 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_role
 from app.core.database import get_db
-from app.models.attribute import AttributeValue
+from app.models.attribute import Attribute, AttributeValue
+from app.models.category import Category
 from app.models.product import Product, ProductImage, ProductVariant
+from app.models.supplier import Supplier
 from app.models.user import User
 from app.schemas.product import ProductInput, ProductOut, VariantInput
 from app.services.codes import (
+    CODE_LEN,
     code_exists,
+    generate_product_code,
     generate_variant_code,
     is_valid_code,
     make_variant_code,
     normalize_code,
+    product_code_exists,
 )
 from app.services.logging import log_action
 from app.services.settings import get_currency
@@ -53,6 +60,23 @@ def _live_variants(product: Product) -> list[ProductVariant]:
     return [v for v in product.variants if not v.is_deleted]
 
 
+def _image_id(url: str) -> int | str:
+    """Export helper: a DB-backed image ('/images/42') exports as just its id (42).
+
+    Anything else (legacy '/uploads/...' or an absolute URL) is left untouched.
+    """
+    m = re.fullmatch(r"/images/(\d+)", (url or "").strip())
+    return int(m.group(1)) if m else url
+
+
+def _image_url(ref: Any) -> str:
+    """Import helper: a bare id (42 or '42') becomes '/images/42'; a path stays as-is."""
+    s = str(ref).strip()
+    if s.isdigit():
+        return f"/images/{s}"
+    return s
+
+
 def _serialize(product: Product) -> dict[str, Any]:
     variants = _live_variants(product)
     images: list[dict] = []
@@ -63,6 +87,7 @@ def _serialize(product: Product) -> dict[str, Any]:
         images = [{"id": 0, "url": f"/images/{product.category.image_id}"}]
     return {
         "id": product.id,
+        "code": product.code,
         "name": product.name,
         "description": product.description,
         "category_id": product.category_id,
@@ -75,6 +100,7 @@ def _serialize(product: Product) -> dict[str, Any]:
         "price": float(product.price or 0),
         "note": product.note,
         "tags": product.tags,
+        "attributes": product.attributes or {},
         "variants": [
             {
                 "id": v.id,
@@ -97,11 +123,26 @@ def _matches_search(product: Product, q: str) -> bool:
     return any(ql in p.lower() for p in parts)
 
 
-def _matches_attributes(product: Product, wanted: dict[int, set[int]]) -> bool:
-    """True if the product has a variant satisfying every selected attribute."""
+def _matches_attributes(
+    product: Product, wanted: dict[int, set[int]], coding_ids: set[int]
+) -> bool:
+    """A product matches when:
+    - every selected GLOBAL (non-coding) attribute is satisfied by the product's
+      shared selection, AND
+    - the selected CODING attributes are all satisfied by a single variant.
+    """
+    global_wanted = {aid: vals for aid, vals in wanted.items() if aid not in coding_ids}
+    coding_wanted = {aid: vals for aid, vals in wanted.items() if aid in coding_ids}
+
+    prod_attrs = {int(k): int(v) for k, v in (product.attributes or {}).items()}
+    if not all(prod_attrs.get(aid) in vals for aid, vals in global_wanted.items()):
+        return False
+
+    if not coding_wanted:
+        return True
     for v in _live_variants(product):
         attrs = {int(k): int(val) for k, val in (v.attributes or {}).items()}
-        if all(attrs.get(aid) in vals for aid, vals in wanted.items()):
+        if all(attrs.get(aid) in vals for aid, vals in coding_wanted.items()):
             return True
     return False
 
@@ -112,19 +153,28 @@ def _apply_variant_images(variant: ProductVariant, urls: list[str] | None):
         variant.images.append(ProductImage(url=url, sort_order=idx))
 
 
+def _set_product_code(db: Session, product: Product, raw_code: str | None):
+    if raw_code and raw_code.strip():
+        code = normalize_code(raw_code)
+        if not is_valid_code(code):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.modal.codeInvalid")
+        if product_code_exists(db, code, exclude_product_id=product.id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "products.modal.codeInUse")
+        product.code = code
+    elif not product.code:
+        product.code = generate_product_code(db)
+
+
 def _set_variant_code(db: Session, variant: ProductVariant, raw_code: str | None):
     if raw_code and raw_code.strip():
         code = normalize_code(raw_code)
         if not is_valid_code(code):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Code must be at least 3 alphanumeric characters",
-            )
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.modal.codeInvalid")
         if code_exists(db, code, exclude_variant_id=variant.id):
-            raise HTTPException(status.HTTP_409_CONFLICT, f"Code '{code}' is already in use")
+            raise HTTPException(status.HTTP_409_CONFLICT, "products.modal.codeInUse")
         variant.code = code
     elif not variant.code:
-        # Auto code: composed from coding attributes' value codes (+ random suffix).
+        # Auto code: readable prefix from coding attribute values + random (8 chars).
         variant.code = make_variant_code(db, variant.attributes)
 
 
@@ -188,7 +238,11 @@ def list_products(
                 aid = vmap.get(vid)
                 if aid is not None:
                     wanted.setdefault(aid, set()).add(vid)
-            rows = [p for p in rows if _matches_attributes(p, wanted)]
+            coding_ids = {
+                a.id for a in db.query(Attribute.id, Attribute.coding)
+                .filter(Attribute.coding.is_(True)).all()
+            }
+            rows = [p for p in rows if _matches_attributes(p, wanted, coding_ids)]
 
     if sort == "price_asc":
         rows.sort(key=lambda p: float(p.price or 0))
@@ -210,6 +264,26 @@ def list_products(
         "currency": get_currency(db),
         "facets": {"max_price": max_price},
     }
+
+
+@router.get("/check-name")
+def check_product_name(
+    name: str = Query(...),
+    exclude_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """True when another (non-deleted) product already uses this exact name.
+    A name is not an identifier, so duplicates are allowed — this only warns."""
+    term = (name or "").strip().lower()
+    if not term:
+        return {"exists": False}
+    q = db.query(Product.id).filter(
+        Product.is_deleted.is_(False), func.lower(Product.name) == term
+    )
+    if exclude_id is not None:
+        q = q.filter(Product.id != exclude_id)
+    return {"exists": db.query(q.exists()).scalar()}
 
 
 @router.get("/{product_id}")
@@ -251,11 +325,27 @@ async def upload_image(
 
 # --------------------------------------------------------------------------- #
 # Export / Import
+#
+# One CSV row per variant. Products are grouped by `product_code` (the product's
+# identifier). Category/supplier/attributes are exported as TEXT names, matched
+# back to ids case-insensitively on import. Images export as bare DB ids.
 # --------------------------------------------------------------------------- #
 _EXPORT_COLUMNS = [
-    "name", "description", "category_id", "supplier_id", "supplier_price",
-    "min_price", "price", "note", "tags", "code", "attributes", "image_urls",
+    "product_code", "name", "description", "category", "supplier",
+    "supplier_price", "min_price", "price", "note", "tags",
+    "global_attributes", "variant_code", "variant_attributes", "image_ids",
 ]
+
+
+def _attrs_to_text(db: Session, attrs_map: dict | None) -> dict[str, str]:
+    """{attr_id: value_id} -> {attribute_name_en: value_name_en}."""
+    out: dict[str, str] = {}
+    for k, vid in (attrs_map or {}).items():
+        attr = db.get(Attribute, int(k))
+        val = db.get(AttributeValue, int(vid)) if vid else None
+        if attr and val:
+            out[attr.name_en] = val.value_en
+    return out
 
 
 @router.get("/export/csv")
@@ -268,6 +358,8 @@ def export_products(
         db.query(Product)
         .options(
             selectinload(Product.variants).selectinload(ProductVariant.images),
+            selectinload(Product.category),
+            selectinload(Product.supplier),
         )
         .filter(Product.is_deleted.is_(False))
         .all()
@@ -276,21 +368,73 @@ def export_products(
     writer = csv.writer(buf)
     writer.writerow(_EXPORT_COLUMNS)
     for p in products:
+        cat = p.category.name_en if p.category else ""
+        sup = p.supplier.name if p.supplier else ""
+        global_txt = json.dumps(_attrs_to_text(db, p.attributes), ensure_ascii=False)
         for v in _live_variants(p):
             writer.writerow([
-                p.name, p.description or "", p.category_id or "", p.supplier_id or "",
+                p.code, p.name, p.description or "", cat, sup,
                 float(p.supplier_price or 0), float(p.min_price or 0), float(p.price or 0),
                 p.note or "", json.dumps(p.tags or [], ensure_ascii=False),
-                v.code, json.dumps(v.attributes or {}, ensure_ascii=False),
-                json.dumps([img.url for img in v.images], ensure_ascii=False),
+                global_txt, v.code,
+                json.dumps(_attrs_to_text(db, v.attributes), ensure_ascii=False),
+                # Only DB-backed image ids — never a filesystem path.
+                json.dumps([i for img in v.images if isinstance(i := _image_id(img.url), int)],
+                           ensure_ascii=False),
             ])
     log_action(db, action="product.export", user_id=user.id, request=request)
-    buf.seek(0)
     return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
+        iter([buf.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=products.csv"},
     )
+
+
+def _import_lookups(db: Session):
+    """Build case-insensitive name->id maps for categories, suppliers, attributes
+    and their values (used to resolve the text columns back to ids)."""
+    cat_by_name: dict[str, int] = {}
+    for c in db.query(Category).all():
+        for nm in (c.name_en, c.name_ar):
+            if nm:
+                cat_by_name[nm.strip().lower()] = c.id
+    sup_by_name = {
+        (s.name or "").strip().lower(): s.id for s in db.query(Supplier).all() if s.name
+    }
+    attr_by_name: dict[str, int] = {}
+    val_by_attr: dict[int, dict[str, int]] = {}
+    attrs = (
+        db.query(Attribute)
+        .options(selectinload(Attribute.values))
+        .filter(Attribute.is_deleted.is_(False))
+        .all()
+    )
+    for a in attrs:
+        for nm in (a.name_en, a.name_ar):
+            if nm:
+                attr_by_name[nm.strip().lower()] = a.id
+        vmap: dict[str, int] = {}
+        for v in a.values:
+            if v.is_deleted:
+                continue
+            for vv in (v.value_en, v.value_ar):
+                if vv:
+                    vmap[vv.strip().lower()] = v.id
+        val_by_attr[a.id] = vmap
+    return cat_by_name, sup_by_name, attr_by_name, val_by_attr
+
+
+def _text_to_attrs(text_map: dict, attr_by_name: dict, val_by_attr: dict) -> dict[str, int]:
+    """{attribute_name: value_name} -> {attr_id: value_id} (case-insensitive)."""
+    out: dict[str, int] = {}
+    for aname, vname in (text_map or {}).items():
+        aid = attr_by_name.get((aname or "").strip().lower())
+        if not aid:
+            continue
+        vid = val_by_attr.get(aid, {}).get((str(vname) or "").strip().lower())
+        if vid:
+            out[str(aid)] = vid
+    return out
 
 
 @router.post("/import/csv")
@@ -302,16 +446,23 @@ async def import_products(
 ):
     content = (await file.read()).decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(content))
-    created = 0
+    cat_by_name, sup_by_name, attr_by_name, val_by_attr = _import_lookups(db)
+
+    created = 0   # new products inserted
+    updated = 0   # existing products matched by code
+    variants = 0  # variants inserted
+    session_products: dict[str, Product] = {}  # product_code -> Product (this import)
+
     for row in reader:
         name = (row.get("name") or "").strip()
-        if not name:
+        pcode = normalize_code(row.get("product_code") or "")
+        if not name and not pcode:
             continue
 
         def _num(key):
             try:
                 return float(row.get(key) or 0)
-            except ValueError:
+            except (ValueError, TypeError):
                 return 0.0
 
         def _json(key, default):
@@ -320,36 +471,70 @@ async def import_products(
             except (ValueError, TypeError):
                 return default
 
-        def _int(key):
-            val = (row.get(key) or "").strip()
-            return int(val) if val.isdigit() else None
+        cat_id = cat_by_name.get((row.get("category") or "").strip().lower())
+        sup_id = sup_by_name.get((row.get("supplier") or "").strip().lower())
+        global_attrs = _text_to_attrs(_json("global_attributes", {}), attr_by_name, val_by_attr)
+        variant_attrs = _text_to_attrs(_json("variant_attributes", {}), attr_by_name, val_by_attr)
 
-        product = Product(
-            name=name,
-            description=(row.get("description") or "").strip() or None,
-            category_id=_int("category_id"),
-            supplier_id=_int("supplier_id"),
-            supplier_price=_num("supplier_price"),
-            min_price=_num("min_price"),
-            price=_num("price"),
-            note=(row.get("note") or "").strip() or None,
-            tags=_json("tags", []),
-        )
-        variant = ProductVariant(attributes=_json("attributes", {}))
-        raw_code = (row.get("code") or "").strip()
-        code = normalize_code(raw_code)
-        variant.code = code if (code and is_valid_code(code) and not code_exists(db, code)) \
-            else generate_variant_code(db)
-        for i, url in enumerate(_json("image_urls", [])[:5]):
-            variant.images.append(ProductImage(url=url, sort_order=i))
-        product.variants.append(variant)
-        db.add(product)
+        # Resolve the product by code: reuse within this import, then the DB.
+        product = None
+        if pcode and is_valid_code(pcode):
+            product = session_products.get(pcode)
+            if product is None:
+                product = (
+                    db.query(Product).filter(Product.code == pcode, Product.is_deleted.is_(False)).first()
+                )
+
+        if product is None:
+            product = Product(name=name or "Unnamed")
+            _set_product_code(db, product, pcode if (pcode and is_valid_code(pcode)) else None)
+            db.add(product)
+            created += 1
+        else:
+            if pcode and product.code == pcode:  # only count a real DB match once
+                updated += 1
+        # (Re)apply shared fields from the row.
+        if name:
+            product.name = name
+        product.description = (row.get("description") or "").strip() or None
+        product.category_id = cat_id
+        product.supplier_id = sup_id
+        product.supplier_price = _num("supplier_price")
+        product.min_price = _num("min_price")
+        product.price = _num("price")
+        product.note = (row.get("note") or "").strip() or None
+        product.tags = _json("tags", [])
+        product.attributes = global_attrs
         db.flush()
-        created += 1
+        session_products[product.code] = product
+
+        # Resolve the variant: update an existing one on THIS product, else add.
+        vcode = normalize_code(row.get("variant_code") or "")
+        variant = None
+        if vcode and is_valid_code(vcode):
+            match = db.query(ProductVariant).filter(ProductVariant.code == vcode).first()
+            if match and match.product_id == product.id:
+                variant = match
+        if variant is None:
+            variant = ProductVariant(product_id=product.id, attributes=variant_attrs)
+            product.variants.append(variant)
+            if vcode and is_valid_code(vcode) and not code_exists(db, vcode):
+                variant.code = vcode
+            else:
+                variant.code = make_variant_code(db, variant_attrs)
+            variants += 1
+        variant.attributes = variant_attrs
+
+        raw_images = _json("image_ids", None)
+        if raw_images is None:
+            raw_images = _json("image_urls", [])  # backward-compat with older exports
+        _apply_variant_images(variant, [_image_url(r) for r in (raw_images or [])[:5]])
+        db.flush()
+
     db.commit()
     log_action(db, action="product.import", user_id=user.id,
-               details={"created": created}, request=request)
-    return {"created": created}
+               details={"created": created, "updated": updated, "variants": variants}, request=request)
+    return {"created": created, "updated": updated, "variants": variants}
 
 
 # --------------------------------------------------------------------------- #
@@ -376,7 +561,9 @@ def create_product(
         price=payload.price,
         note=payload.note,
         tags=payload.tags,
+        attributes=_norm_attrs(payload.attributes),
     )
+    _set_product_code(db, product, payload.code)
     db.add(product)
     db.flush()
     for vin in payload.variants:
@@ -404,6 +591,7 @@ def update_product(
     if not product or product.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
 
+    _set_product_code(db, product, payload.code)
     product.name = payload.name
     product.description = payload.description
     product.category_id = payload.category_id
@@ -413,6 +601,7 @@ def update_product(
     product.price = payload.price
     product.note = payload.note
     product.tags = payload.tags
+    product.attributes = _norm_attrs(payload.attributes)
 
     existing = {v.id: v for v in product.variants}
     keep_ids: set[int] = set()
@@ -440,6 +629,24 @@ def update_product(
     log_action(db, action="product.update", user_id=user.id, entity="product",
                entity_id=product.id, request=request)
     return _serialize(product)
+
+
+@router.post("/clear-all")
+def clear_all_products(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Admin")),
+):
+    """Soft-delete EVERY product (empties the store). Never a physical delete."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = db.query(Product).filter(Product.is_deleted.is_(False)).all()
+    for p in rows:
+        p.is_deleted = True
+        p.deleted_at = now
+    db.commit()
+    log_action(db, action="product.clear_all", user_id=user.id,
+               details={"count": len(rows)}, request=request)
+    return {"ok": True, "count": len(rows)}
 
 
 @router.delete("/{product_id}")

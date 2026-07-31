@@ -5,7 +5,10 @@
 - Each ``ProductVariant`` is a unique size/colour(/...) combination with its own
   unique ``code`` and its own images. A product always has at least one variant;
   when no attributes are defined the single variant simply carries no attributes.
-- ``ProductVariant.attributes`` is a JSON map ``{attribute_id: attribute_value_id}``.
+- ``ProductVariant.attributes`` is a JSON map ``{attribute_id: attribute_value_id}``
+  holding only the *coding* attributes (the ones that differentiate variants).
+- ``Product.attributes`` holds the *global* (non-coding) attribute selections that
+  are shared across every variant of the product.
 - Prices are float. Deletion is a SOFT delete.
 """
 from __future__ import annotations
@@ -32,6 +35,8 @@ class Product(Base):
     __tablename__ = "products"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The product's own identifier: 8-char uppercase alphanumeric, unique.
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -48,6 +53,9 @@ class Product(Base):
 
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Global (non-coding) attribute selections shared by all variants:
+    # {attribute_id: attribute_value_id}
+    attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

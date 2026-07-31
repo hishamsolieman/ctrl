@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
-import { listAttributes, deleteAttribute } from "@/lib/products";
+import {
+  listAttributes,
+  deleteAttribute,
+  exportAttributes,
+  importAttributes,
+} from "@/lib/products";
 import AttributeModal from "@/components/attributes/AttributeModal";
 import AttributeViewModal from "@/components/attributes/AttributeViewModal";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -9,6 +14,8 @@ import {
   IconPlus,
   IconSearch,
   IconSliders,
+  IconDownload,
+  IconUpload,
   IconEye,
   IconEdit,
   IconCopy,
@@ -44,6 +51,7 @@ export default function ProductAttributes() {
   const [viewing, setViewing] = useState(null);
   const [toDelete, setToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const importRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +88,30 @@ export default function ProductAttributes() {
   const openAdd = () => setModal({ open: true, mode: "add", attribute: null });
   const openEdit = (a) => setModal({ open: true, mode: "edit", attribute: a });
   const openCopy = (a) => setModal({ open: true, mode: "copy", attribute: a });
+
+  async function onExport() {
+    try {
+      await exportAttributes(q.trim() || undefined);
+    } catch {
+      toast.error(t("auth.genericError"));
+    }
+  }
+  async function onImport(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const res = await importAttributes(file);
+      if (res.skipped > 0) {
+        toast.success(t("products.attrs.importDoneSkipped", { count: res.created, skipped: res.skipped }));
+      } else {
+        toast.success(t("products.attrs.importDone", { count: res.created }));
+      }
+      load();
+    } catch {
+      toast.error(t("auth.genericError"));
+    }
+  }
 
   async function confirmDelete() {
     if (!toDelete) return;
@@ -130,9 +162,20 @@ export default function ProductAttributes() {
           <h1 className="text-xl font-bold text-text">{t("products.attrs.title")}</h1>
           <p className="text-sm text-muted">{t("products.attrs.subtitle")}</p>
         </div>
-        <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
-          <IconPlus width={16} height={16} /> {t("products.attrs.add")}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={onExport}
+            className="ctrl-btn border border-border px-3 py-2 text-sm text-text hover:bg-elevated">
+            <IconDownload width={16} height={16} /> {t("products.export")}
+          </button>
+          <button onClick={() => importRef.current?.click()}
+            className="ctrl-btn border border-border px-3 py-2 text-sm text-text hover:bg-elevated">
+            <IconUpload width={16} height={16} /> {t("products.import")}
+          </button>
+          <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={onImport} />
+          <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
+            <IconPlus width={16} height={16} /> {t("products.attrs.add")}
+          </button>
+        </div>
       </div>
 
       {/* Search */}

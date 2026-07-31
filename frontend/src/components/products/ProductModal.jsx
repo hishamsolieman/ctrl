@@ -2,12 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Modal from "@/components/Modal";
 import { useToast } from "@/context/ToastContext";
-import { createProduct, updateProduct, uploadProductImage, mediaUrl } from "@/lib/products";
+import { createProduct, updateProduct, uploadImage, checkProductName, mediaUrl } from "@/lib/products";
 import { IconPlus, IconX, IconImage, IconTrash } from "@/components/icons";
 
 let _uid = 1;
 const nextKey = () => `v${_uid++}`;
-const CODE_RE = /^[A-Za-z0-9]{3,32}$/;
+const CODE_RE = /^[A-Za-z0-9]{8}$/;
+
+// Keep only the {attrId: valueId} entries whose attribute is in `attrs`.
+function pickAttrs(map, attrs) {
+  const ids = new Set(attrs.map((a) => String(a.id)));
+  const out = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    if (ids.has(String(k)) && v) out[String(k)] = Number(v);
+  }
+  return out;
+}
 
 function emptyVariant() {
   return { key: nextKey(), id: null, code: "", attributes: {}, images: [] };
@@ -17,6 +27,7 @@ function fromProduct(p, mode) {
   if (!p) return { ...blankForm(), variants: [emptyVariant()] };
   const isCopy = mode === "copy";
   return {
+    code: isCopy ? "" : p.code || "", // copy => new auto product code
     name: p.name || "",
     description: p.description || "",
     note: p.note || "",
@@ -26,6 +37,9 @@ function fromProduct(p, mode) {
     min_price: p.min_price ?? "",
     price: p.price ?? "",
     tags: [...(p.tags || [])],
+    attributes: Object.fromEntries(
+      Object.entries(p.attributes || {}).map(([k, val]) => [String(k), Number(val)])
+    ),
     variants: (p.variants || []).map((v) => ({
       key: nextKey(),
       id: isCopy ? null : v.id,
@@ -40,6 +54,7 @@ function fromProduct(p, mode) {
 
 function blankForm() {
   return {
+    code: "",
     name: "",
     description: "",
     note: "",
@@ -49,6 +64,7 @@ function blankForm() {
     min_price: "",
     price: "",
     tags: [],
+    attributes: {},
     variants: [],
   };
 }
@@ -85,7 +101,11 @@ export default function ProductModal({
     return t("products.modal.addTitle");
   }, [mode, t]);
 
-  const hasAttributes = (attributes?.length || 0) > 0;
+  // Coding attributes differentiate variants; non-coding ("global") attributes
+  // apply to the whole product (same across all variants).
+  const codingAttrs = (attributes || []).filter((a) => a.coding);
+  const globalAttrs = (attributes || []).filter((a) => !a.coding);
+  const hasVariants = codingAttrs.length > 0;
   const inputCls = "ctrl-input-sm w-full text-sm";
   const labelCls = "mb-1 block text-xs font-medium text-muted";
 
@@ -125,6 +145,14 @@ export default function ProductModal({
       }),
     }));
   }
+  function setGlobalAttr(attrId, valueId) {
+    setForm((f) => {
+      const attrs = { ...f.attributes };
+      if (valueId) attrs[String(attrId)] = Number(valueId);
+      else delete attrs[String(attrId)];
+      return { ...f, attributes: attrs };
+    });
+  }
 
   async function onFiles(key, e) {
     const files = [...e.target.files];
@@ -135,7 +163,7 @@ export default function ProductModal({
     setUploadingKey(key);
     try {
       const urls = [];
-      for (const file of files.slice(0, room)) urls.push(await uploadProductImage(file));
+      for (const file of files.slice(0, room)) urls.push(await uploadImage(file));
       setForm((f) => ({
         ...f,
         variants: f.variants.map((v) =>
@@ -167,23 +195,41 @@ export default function ProductModal({
       toast.error(t("products.modal.variantRequired"));
       return;
     }
+    if (form.code && !CODE_RE.test(form.code.trim())) {
+      toast.error(t("products.modal.codeInvalid"));
+      return;
+    }
     for (const v of form.variants) {
       if (v.code && !CODE_RE.test(v.code.trim())) {
         toast.error(t("products.modal.codeInvalid"));
         return;
       }
     }
-    // Every required attribute must have a value selected on every variant.
-    const requiredAttrs = (attributes || []).filter((a) => a.is_required);
-    for (const a of requiredAttrs) {
-      const missing = form.variants.some((v) => !v.attributes[String(a.id)]);
-      if (missing) {
+    // Required global attributes must be selected at the product level.
+    for (const a of globalAttrs.filter((x) => x.is_required)) {
+      if (!form.attributes[String(a.id)]) {
+        toast.error(t("products.modal.requiredAttr", { name: isAr ? a.name_ar : a.name_en }));
+        return;
+      }
+    }
+    // Required coding attributes must be selected on every variant.
+    for (const a of codingAttrs.filter((x) => x.is_required)) {
+      if (form.variants.some((v) => !v.attributes[String(a.id)])) {
         toast.error(t("products.modal.requiredAttr", { name: isAr ? a.name_ar : a.name_en }));
         return;
       }
     }
 
+    // A name isn't an identifier: warn (don't block) when it's already used.
+    try {
+      const dup = await checkProductName(form.name.trim(), mode === "edit" ? initial?.id : undefined);
+      if (dup) toast.info(t("products.modal.nameDuplicate"));
+    } catch {
+      /* non-blocking */
+    }
+
     const payload = {
+      code: form.code ? form.code.trim().toUpperCase() : null,
       name: form.name.trim(),
       description: form.description || null,
       note: form.note || null,
@@ -193,10 +239,11 @@ export default function ProductModal({
       min_price: Number(form.min_price) || 0,
       price: Number(form.price) || 0,
       tags: form.tags,
+      attributes: pickAttrs(form.attributes, globalAttrs),
       variants: form.variants.map((v) => ({
         ...(mode === "edit" && v.id ? { id: v.id } : {}),
         code: v.code ? v.code.trim().toUpperCase() : null,
-        attributes: v.attributes,
+        attributes: pickAttrs(v.attributes, codingAttrs),
         image_urls: v.images,
       })),
     };
@@ -241,7 +288,13 @@ export default function ProductModal({
     >
       {/* Shared fields */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="md:col-span-2">
+        <div>
+          <label className={labelCls}>{t("products.modal.productCode")}</label>
+          <input className={inputCls + " font-mono uppercase"} value={form.code}
+            placeholder={t("products.modal.codeAuto")} maxLength={8}
+            onChange={(e) => set("code", e.target.value)} />
+        </div>
+        <div>
           <label className={labelCls}>{t("products.modal.name")} *</label>
           <input className={inputCls} value={form.name} onChange={(e) => set("name", e.target.value)} />
         </div>
@@ -314,11 +367,47 @@ export default function ProductModal({
         </div>
       </div>
 
-      {/* Variants */}
+      {/* Global (non-coding) attributes — one selection shared by all variants */}
+      {globalAttrs.length > 0 && (
+        <div className="mt-5">
+          <label className={labelCls + " mb-2 block"}>{t("products.modal.productAttributes")}</label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {globalAttrs.map((attr) => {
+              const selId = form.attributes[String(attr.id)];
+              const selVal = attr.values.find((x) => x.id === Number(selId));
+              return (
+                <div key={attr.id}>
+                  <label className={labelCls}>
+                    {isAr ? attr.name_ar : attr.name_en}
+                    {attr.is_required && <span className="text-accent"> *</span>}
+                  </label>
+                  <div className="relative">
+                    {attr.type === "color" && selVal?.extra?.hex && (
+                      <span className="pointer-events-none absolute inset-y-0 start-2.5 flex items-center">
+                        <span className="h-4 w-4 rounded-full border border-white/20"
+                          style={{ backgroundColor: selVal.extra.hex }} />
+                      </span>
+                    )}
+                    <select className={`${inputCls} ctrl-select ${attr.type === "color" && selVal?.extra?.hex ? "ps-9" : ""}`}
+                      value={selId || ""} onChange={(e) => setGlobalAttr(attr.id, e.target.value)}>
+                      <option value="">{t("products.modal.selectValue")}</option>
+                      {attr.values.map((val) => (
+                        <option key={val.id} value={val.id}>{isAr ? val.value_ar : val.value_en}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Variants (only when coding attributes exist) */}
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between">
           <label className={labelCls + " mb-0"}>{t("products.modal.variants")}</label>
-          {hasAttributes && (
+          {hasVariants && (
             <button type="button" onClick={addVariant}
               className="flex items-center gap-1 text-xs font-medium text-accent hover:underline">
               <IconPlus width={14} height={14} /> {t("products.modal.addVariant")}
@@ -326,7 +415,7 @@ export default function ProductModal({
           )}
         </div>
 
-        {!hasAttributes && (
+        {!hasVariants && (
           <p className="mb-2 text-xs text-muted">{t("products.modal.noAttributesHint")}</p>
         )}
 
@@ -353,8 +442,8 @@ export default function ProductModal({
                     placeholder={t("products.modal.codeAuto")}
                     onChange={(e) => updateVariant(v.key, { code: e.target.value })} />
                 </div>
-                {/* Attribute selects */}
-                {attributes.map((attr) => {
+                {/* Coding attribute selects (these differentiate variants) */}
+                {codingAttrs.map((attr) => {
                   const selId = v.attributes[String(attr.id)];
                   const selVal = attr.values.find((x) => x.id === Number(selId));
                   return (

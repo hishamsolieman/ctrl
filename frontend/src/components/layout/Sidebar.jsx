@@ -17,7 +17,7 @@ const NAV = [
     key: "nav.products",
     Icon: IconBox,
     children: [
-      { to: "/products", key: "nav.productList", Icon: IconList, end: true },
+      { to: "/products/list", key: "nav.productList", Icon: IconList },
       { to: "/products/categories", key: "nav.productCategories", Icon: IconTag },
       { to: "/products/attributes", key: "nav.productAttributes", Icon: IconSliders },
     ],

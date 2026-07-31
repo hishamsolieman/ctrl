@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import PriceRange from "@/components/products/PriceRange";
+import MultiSelectDropdown from "@/components/products/MultiSelectDropdown";
 import { IconChevronDown } from "@/components/icons";
 
 function Section({ title, children }) {
@@ -65,58 +66,37 @@ function SortDropdown({ value, onChange }) {
   );
 }
 
-// One filter section per defined attribute. Colour-like attributes (values with
-// a hex) render as swatches; everything else renders as chips.
-function AttributeFilter({ attribute, isAr, selected, onToggle }) {
-  const isColor =
-    attribute.key === "color" || attribute.values.some((v) => v.extra?.hex);
+// One dropdown filter per defined attribute (search + checkboxes; colour
+// attributes show a coloured circle beside each value).
+function AttributeFilter({ attribute, isAr, filters, setFilters }) {
+  const { t } = useTranslation();
+  const valueIds = attribute.values.map((v) => v.id);
+  const selected = filters.attrValues.filter((id) => valueIds.includes(id));
+  const options = attribute.values.map((v) => ({
+    id: v.id,
+    label: isAr ? v.value_ar : v.value_en,
+    hex: v.extra?.hex,
+  }));
+  const showColors = attribute.type === "color";
+
+  function onChange(ids) {
+    setFilters((f) => {
+      const others = f.attrValues.filter((id) => !valueIds.includes(id));
+      return { ...f, attrValues: [...others, ...ids] };
+    });
+  }
+
   return (
     <Section title={isAr ? attribute.name_ar : attribute.name_en}>
-      {isColor ? (
-        <div className="flex flex-wrap gap-3">
-          {attribute.values.map((v) => {
-            const active = selected.includes(v.id);
-            return (
-              <button
-                key={v.id}
-                type="button"
-                title={isAr ? v.value_ar : v.value_en}
-                onClick={() => onToggle(v.id)}
-                className={`relative h-7 w-7 rounded-full border-2 transition ${
-                  active ? "border-accent" : "border-border hover:border-muted"
-                }`}
-                style={{ backgroundColor: v.extra?.hex || "#888" }}
-              >
-                {!v.extra?.hex && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[9px] text-white">
-                    {(isAr ? v.value_ar : v.value_en)?.slice(0, 2)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {attribute.values.map((v) => {
-            const active = selected.includes(v.id);
-            return (
-              <button
-                key={v.id}
-                type="button"
-                onClick={() => onToggle(v.id)}
-                className={`min-w-[2.25rem] rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                  active
-                    ? "border-accent bg-accent text-black"
-                    : "border-border text-muted hover:border-accent/50 hover:text-text"
-                }`}
-              >
-                {isAr ? v.value_ar : v.value_en}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <MultiSelectDropdown
+        options={options}
+        selected={selected}
+        onChange={onChange}
+        showColors={showColors}
+        summaryEmpty={t("products.filters.any")}
+        summaryAll={t("products.filters.allSelected")}
+        searchPlaceholder={t("products.filters.searchValues")}
+      />
     </Section>
   );
 }
@@ -133,35 +113,18 @@ export default function FilterRail({
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
 
-  function toggleArray(field, val) {
-    setFilters((f) => {
-      const set = new Set(f[field]);
-      set.has(val) ? set.delete(val) : set.add(val);
-      return { ...f, [field]: [...set] };
-    });
-  }
-
   return (
     <div className="w-full">
-      {/* Category */}
+      {/* Category — dropdown with search + checkboxes (all selected by default) */}
       <Section title={t("products.filters.byCategory")}>
-        <div className="max-h-44 space-y-1 overflow-y-auto pe-1">
-          {categories.map((c) => (
-            <label
-              key={c.id}
-              className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-muted transition hover:bg-elevated hover:text-text"
-            >
-              <input
-                type="checkbox"
-                checked={filters.categoryIds.includes(c.id)}
-                onChange={() => toggleArray("categoryIds", c.id)}
-                className="ctrl-check"
-              />
-              {isAr ? c.name_ar : c.name_en}
-            </label>
-          ))}
-          {categories.length === 0 && <p className="px-2 py-1 text-sm text-muted">—</p>}
-        </div>
+        <MultiSelectDropdown
+          options={categories.map((c) => ({ id: c.id, label: isAr ? c.name_ar : c.name_en }))}
+          selected={filters.categoryIds}
+          onChange={(ids) => setFilters((f) => ({ ...f, categoryIds: ids }))}
+          summaryEmpty={t("products.filters.allCategories")}
+          summaryAll={t("products.filters.allCategories")}
+          searchPlaceholder={t("products.filters.searchCategory")}
+        />
       </Section>
 
       {/* Date */}
@@ -204,14 +167,14 @@ export default function FilterRail({
         />
       </Section>
 
-      {/* Dynamic attribute filters (Color, Size, ...) */}
+      {/* Dynamic attribute filters (dropdown with search + checkboxes) */}
       {attributes.map((attr) => (
         <AttributeFilter
           key={attr.id}
           attribute={attr}
           isAr={isAr}
-          selected={filters.attrValues}
-          onToggle={(id) => toggleArray("attrValues", id)}
+          filters={filters}
+          setFilters={setFilters}
         />
       ))}
 

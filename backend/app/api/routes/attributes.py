@@ -8,10 +8,15 @@
 """
 from __future__ import annotations
 
+import csv
+import io
+import json
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_role
@@ -209,6 +214,145 @@ def list_attributes(db: Session = Depends(get_db), _u: User = Depends(get_curren
     )
     used_attr_ids, _ = _usage(db)
     return [_serialize(a, used_attr_ids) for a in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Export / Import (CSV)
+# --------------------------------------------------------------------------- #
+_EXPORT_COLUMNS = ["name_en", "name_ar", "type", "is_required", "coding", "values"]
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+@router.get("/export/csv")
+def export_attributes(
+    q: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Export the live attributes matching the on-screen search. `values` is a
+    JSON array of {value_en, value_ar, hex?} so colours keep their palette."""
+    query = (
+        db.query(Attribute)
+        .options(selectinload(Attribute.values))
+        .filter(Attribute.is_deleted.is_(False))
+    )
+    term = (q or "").strip()
+    if term:
+        like = f"%{term}%"
+        query = query.filter(
+            or_(Attribute.name_en.ilike(like), Attribute.name_ar.ilike(like), Attribute.key.ilike(like))
+        )
+    rows = query.order_by(func.lower(Attribute.name_en)).all()
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(_EXPORT_COLUMNS)
+    for a in rows:
+        vals = []
+        for v in a.values:
+            if v.is_deleted:
+                continue
+            item = {"value_en": v.value_en, "value_ar": v.value_ar}
+            hx = (v.extra or {}).get("hex")
+            if hx:
+                item["hex"] = hx
+            vals.append(item)
+        w.writerow([
+            a.name_en, a.name_ar, a.type,
+            int(bool(a.is_required)), int(bool(a.coding)),
+            json.dumps(vals, ensure_ascii=False),
+        ])
+    log_action(db, action="attribute.export", user_id=user.id, request=request)
+    # UTF-8 BOM so Excel renders Arabic correctly.
+    return StreamingResponse(
+        iter([buf.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=attributes.csv"},
+    )
+
+
+@router.post("/import/csv")
+async def import_attributes(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+    request: Request = None,  # type: ignore[assignment]
+):
+    content = (await file.read()).decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(content))
+    created = 0
+    skipped = 0
+    seen_en: set[str] = set()
+    seen_ar: set[str] = set()
+    existing = db.query(Attribute).filter(Attribute.is_deleted.is_(False)).all()
+    taken_en = {(a.name_en or "").strip().lower() for a in existing}
+    taken_ar = {(a.name_ar or "").strip().lower() for a in existing}
+
+    for row in reader:
+        name_en = (row.get("name_en") or "").strip()
+        name_ar = (row.get("name_ar") or "").strip()
+        if not name_en or not name_ar:
+            continue
+        ken, kar = name_en.lower(), name_ar.lower()
+        # Skip names that already exist (DB) or repeat within the file.
+        if ken in taken_en or kar in taken_ar or ken in seen_en or kar in seen_ar:
+            skipped += 1
+            continue
+
+        atype = (row.get("type") or "text").strip().lower()
+        if atype not in {"text", "number", "color"}:
+            atype = "text"
+        try:
+            raw_vals = json.loads(row.get("values") or "[]")
+        except (ValueError, TypeError):
+            raw_vals = []
+
+        attr = Attribute(
+            key=_unique_key(db, name_en),
+            type=atype,
+            name_en=name_en,
+            name_ar=name_ar,
+            is_required=_truthy(row.get("is_required")),
+            coding=_truthy(row.get("coding")),
+        )
+        db.add(attr)
+        db.flush()
+
+        vseen_en: set[str] = set()
+        vseen_ar: set[str] = set()
+        for i, rv in enumerate(raw_vals if isinstance(raw_vals, list) else []):
+            if not isinstance(rv, dict):
+                continue
+            ven = (rv.get("value_en") or "").strip()
+            var = (rv.get("value_ar") or "").strip()
+            if not ven or not var:
+                continue
+            if ven.lower() in vseen_en or var.lower() in vseen_ar:
+                continue  # drop in-attribute duplicate values
+            vseen_en.add(ven.lower())
+            vseen_ar.add(var.lower())
+            extra = None
+            if atype == "color":
+                hx = (rv.get("hex") or "").strip()
+                if hx:
+                    extra = {"hex": hx}
+            attr.values.append(AttributeValue(value_en=ven, value_ar=var, extra=extra, sort_order=i))
+
+        if attr.is_required:
+            _backfill_required(db, attr)
+
+        seen_en.add(ken)
+        seen_ar.add(kar)
+        created += 1
+
+    db.commit()
+    log_action(db, action="attribute.import", user_id=user.id,
+               details={"created": created, "skipped": skipped}, request=request)
+    return {"created": created, "skipped": skipped}
 
 
 # --------------------------------------------------------------------------- #

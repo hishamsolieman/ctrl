@@ -36,9 +36,9 @@ export default function ProductCard({ product, currency, onView, onEdit, onCopy,
     "flex h-8 w-8 items-center justify-center rounded-full bg-bg/80 text-text backdrop-blur transition hover:bg-accent hover:text-black";
 
   return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-surface transition hover:border-accent/60">
-      {/* Image / carousel */}
-      <div className="relative aspect-square overflow-hidden bg-elevated">
+    <div className="group relative flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface transition hover:border-accent/60">
+      {/* Image / carousel — fills the available height so cards adapt to the page */}
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-elevated">
         {images.length > 0 ? (
           <div
             className="flex h-full w-full transition-transform duration-700 ease-in-out"
@@ -105,7 +105,7 @@ export default function ProductCard({ product, currency, onView, onEdit, onCopy,
       </div>
 
       {/* Body */}
-      <div className="flex flex-1 flex-col p-4">
+      <div className="flex shrink-0 flex-col p-3">
         <div className="flex items-center justify-between">
           {categoryName ? (
             <p className="text-[11px] font-medium uppercase tracking-wide text-accent">

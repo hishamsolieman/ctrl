@@ -7,6 +7,7 @@ import {
   listSuppliers,
   listAttributes,
   deleteProduct,
+  clearAllProducts,
   exportProducts,
   importProducts,
 } from "@/lib/products";
@@ -22,12 +23,13 @@ import {
   IconUpload,
   IconPlus,
   IconX,
+  IconTrash,
   IconFilter,
   IconChevronLeft,
   IconChevronRight,
 } from "@/components/icons";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 8;
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -75,8 +77,11 @@ export default function Products() {
   const [viewing, setViewing] = useState(null);
   const [toDelete, setToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [clearAllOpen, setClearAllOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const importRef = useRef(null);
+  const catInit = useRef(false);
 
   const loadRefData = useCallback(() => {
     listCategories().then(setCategories).catch(() => {});
@@ -88,11 +93,22 @@ export default function Products() {
     loadRefData();
   }, [loadRefData]);
 
+  // Category filter defaults to ALL categories selected (once, on first load).
+  useEffect(() => {
+    if (!catInit.current && categories.length) {
+      catInit.current = true;
+      setFilters((f) => ({ ...f, categoryIds: categories.map((c) => c.id) }));
+    }
+  }, [categories]);
+
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     const params = { sort: filters.sort, page, page_size: PAGE_SIZE };
     if (filters.q) params.q = filters.q;
-    if (filters.categoryIds.length) params.category_ids = filters.categoryIds.join(",");
+    // Only constrain when a PARTIAL set is selected — all/none => no filter.
+    if (filters.categoryIds.length && filters.categoryIds.length < categories.length) {
+      params.category_ids = filters.categoryIds.join(",");
+    }
     if (filters.dateFrom) params.date_from = filters.dateFrom;
     if (filters.dateTo) params.date_to = filters.dateTo;
     if (filters.priceMin != null) params.price_min = filters.priceMin;
@@ -110,7 +126,7 @@ export default function Products() {
     } finally {
       setLoading(false);
     }
-  }, [filters, page, t, toast]);
+  }, [filters, page, t, toast, categories.length]);
 
   // Reset to first page whenever the filters change.
   useEffect(() => {
@@ -124,8 +140,22 @@ export default function Products() {
   }, [fetchProducts]);
 
   function resetFilters() {
-    setFilters(makeDefaultFilters());
+    setFilters({ ...makeDefaultFilters(), categoryIds: categories.map((c) => c.id) });
     toast.info(t("products.cleared"));
+  }
+
+  async function confirmClearAll() {
+    setClearing(true);
+    try {
+      const res = await clearAllProducts();
+      toast.success(t("products.clearAllDone", { count: res.count }));
+      setClearAllOpen(false);
+      fetchProducts();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || t("auth.genericError"));
+    } finally {
+      setClearing(false);
+    }
   }
 
   async function onExport() {
@@ -184,8 +214,9 @@ export default function Products() {
             <IconUpload width={16} height={16} /> {t("products.import")}
           </button>
           <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={onImport} />
-          <button onClick={resetFilters} className={toolbarBtn}>
-            <IconX width={16} height={16} /> {t("products.clearAll")}
+          <button onClick={() => setClearAllOpen(true)}
+            className="ctrl-btn border border-red-500/50 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10">
+            <IconTrash width={16} height={16} /> {t("products.clearAll")}
           </button>
           <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
             <IconPlus width={16} height={16} /> {t("products.addProduct")}
@@ -233,13 +264,9 @@ export default function Products() {
         <section className={`flex min-w-0 flex-1 flex-col ${showFilters ? "hidden lg:flex" : "flex"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {loading ? (
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-4">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="aspect-square rounded-2xl bg-elevated" />
-                    <div className="mt-3 h-3 w-2/3 rounded bg-elevated" />
-                    <div className="mt-2 h-3 w-1/3 rounded bg-elevated" />
-                  </div>
+              <div className="grid h-full auto-rows-fr grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                  <div key={i} className="animate-pulse rounded-2xl bg-elevated" />
                 ))}
               </div>
             ) : items.length === 0 ? (
@@ -256,7 +283,7 @@ export default function Products() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid h-full auto-rows-fr grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {items.map((p) => (
                   <ProductCard
                     key={p.id}
@@ -328,6 +355,17 @@ export default function Products() {
         body={t("products.confirmDelete.body", { name: toDelete?.name || "" })}
         confirmLabel={t("products.confirmDelete.confirm")}
         cancelLabel={t("products.confirmDelete.cancel")}
+      />
+
+      <ConfirmDialog
+        open={clearAllOpen}
+        onClose={() => setClearAllOpen(false)}
+        onConfirm={confirmClearAll}
+        loading={clearing}
+        title={t("products.clearAllConfirm.title")}
+        body={t("products.clearAllConfirm.body")}
+        confirmLabel={t("products.clearAllConfirm.confirm")}
+        cancelLabel={t("products.clearAllConfirm.cancel")}
       />
     </div>
   );

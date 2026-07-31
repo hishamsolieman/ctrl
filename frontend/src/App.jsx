@@ -35,7 +35,8 @@ export default function App() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/products" element={<Products />} />
+            <Route path="/products" element={<Navigate to="/products/list" replace />} />
+            <Route path="/products/list" element={<Products />} />
             <Route path="/products/categories" element={<ProductCategories />} />
             <Route path="/products/attributes" element={<ProductAttributes />} />
           </Route>

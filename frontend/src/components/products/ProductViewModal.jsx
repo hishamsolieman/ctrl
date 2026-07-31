@@ -21,6 +21,24 @@ export default function ProductViewModal({ open, product, attributes, currency, 
     a.values.forEach((v) => (valueById[v.id] = { ...v, attribute: a }))
   );
 
+  function attrChips(map) {
+    return Object.entries(map || {}).map(([aid, vid]) => {
+      const attr = attrById[aid];
+      const val = valueById[vid];
+      if (!attr || !val) return null;
+      const label = `${isAr ? attr.name_ar : attr.name_en}: ${isAr ? val.value_ar : val.value_en}`;
+      return (
+        <span key={aid}
+          className="inline-flex items-center gap-1.5 rounded-md bg-elevated px-2 py-1 text-xs text-muted">
+          {val.extra?.hex && (
+            <span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: val.extra.hex }} />
+          )}
+          {label}
+        </span>
+      );
+    });
+  }
+
   function variantChips(variant) {
     const entries = Object.entries(variant.attributes || {});
     return entries.map(([aid, vid]) => {
@@ -53,7 +71,14 @@ export default function ProductViewModal({ open, product, attributes, currency, 
     <Modal open={open} onClose={onClose} title={t("products.detail.title")} size="lg">
       <div className="space-y-5">
         <div>
-          <h3 className="text-lg font-bold text-text">{product.name}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-bold text-text">{product.name}</h3>
+            {product.code && (
+              <span className="rounded-md bg-elevated px-2 py-0.5 font-mono text-xs text-muted">
+                {product.code}
+              </span>
+            )}
+          </div>
           {categoryName && <p className="mt-0.5 text-sm text-accent">{categoryName}</p>}
         </div>
 
@@ -101,6 +126,14 @@ export default function ProductViewModal({ open, product, attributes, currency, 
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Global (product-level) attributes */}
+        {Object.keys(product.attributes || {}).length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-medium text-muted">{t("products.modal.productAttributes")}</p>
+            <div className="flex flex-wrap gap-2">{attrChips(product.attributes)}</div>
           </div>
         )}
 

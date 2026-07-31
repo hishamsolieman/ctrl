@@ -1,9 +1,11 @@
-"""Product-variant codes.
+"""Product & variant codes.
 
 Rules (per spec):
-- Alphanumeric, uppercase (case-insensitive on input), at least 3 characters.
+- Exactly 8 alphanumeric characters, uppercase (case-insensitive on input).
 - Auto-generated codes are random (never sequential/"successive").
 - The user may supply a custom code as long as it meets the criteria.
+- A product carries its own code (its identifier); each variant carries a
+  separate code that differs from the product code.
 """
 from __future__ import annotations
 
@@ -13,13 +15,12 @@ import string
 
 from sqlalchemy.orm import Session
 
-from app.models.product import ProductVariant
+from app.models.product import Product, ProductVariant
 
 ALPHABET = string.ascii_uppercase + string.digits  # A-Z 0-9
-MIN_LEN = 3
-MAX_LEN = 32
-_GEN_LEN = 6  # default length for auto-generated codes (>= MIN_LEN)
-_CODE_RE = re.compile(rf"^[A-Z0-9]{{{MIN_LEN},{MAX_LEN}}}$")
+CODE_LEN = 8  # codes are exactly 8 characters
+MAX_LEN = CODE_LEN
+_CODE_RE = re.compile(rf"^[A-Z0-9]{{{CODE_LEN}}}$")
 
 
 def normalize_code(raw: str) -> str:
@@ -37,15 +38,31 @@ def code_exists(db: Session, code: str, exclude_variant_id: int | None = None) -
     return db.query(q.exists()).scalar()
 
 
-def _random_code(length: int = _GEN_LEN) -> str:
+def product_code_exists(db: Session, code: str, exclude_product_id: int | None = None) -> bool:
+    q = db.query(Product.id).filter(Product.code == code)
+    if exclude_product_id is not None:
+        q = q.filter(Product.id != exclude_product_id)
+    return db.query(q.exists()).scalar()
+
+
+def _random_code(length: int = CODE_LEN) -> str:
     return "".join(secrets.choice(ALPHABET) for _ in range(length))
 
 
 def generate_variant_code(db: Session) -> str:
-    """Return a fresh random (non-sequential) code, unique across variants."""
-    for _ in range(60):
+    """Return a fresh random (non-sequential) 8-char code, unique across variants."""
+    for _ in range(80):
         code = _random_code()
         if not code_exists(db, code):
+            return code
+    raise RuntimeError("Could not generate a unique variant code")
+
+
+def generate_product_code(db: Session) -> str:
+    """Return a fresh random (non-sequential) 8-char code, unique across products."""
+    for _ in range(80):
+        code = _random_code()
+        if not product_code_exists(db, code):
             return code
     raise RuntimeError("Could not generate a unique product code")
 
@@ -88,14 +105,11 @@ def compose_code_base(db: Session, attributes_map: dict | None) -> str | None:
 
 
 def make_variant_code(db: Session, attributes_map: dict | None) -> str:
-    """Auto variant code: a readable prefix from coding attribute values plus a
-    random suffix to guarantee global uniqueness (falls back to fully random)."""
-    base = compose_code_base(db, attributes_map)
-    if not base:
-        return generate_variant_code(db)
-    base = base[:MAX_LEN - 3]
-    for _ in range(60):
-        code = f"{base}{_random_code(3)}"
+    """Auto variant code: a short readable prefix from coding attribute values,
+    padded with random characters to an exact length of 8 and made unique."""
+    base = (compose_code_base(db, attributes_map) or "")[:4]
+    for _ in range(80):
+        code = f"{base}{_random_code(CODE_LEN)}"[:CODE_LEN]
         if is_valid_code(code) and not code_exists(db, code):
             return code
     return generate_variant_code(db)
