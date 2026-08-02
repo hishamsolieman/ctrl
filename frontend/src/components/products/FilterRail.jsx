@@ -113,8 +113,34 @@ export default function FilterRail({
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
 
+  const stockOptions = [
+    { key: "all", label: t("products.filters.stockAll") },
+    { key: "in", label: t("products.filters.stockIn") },
+    { key: "out", label: t("products.filters.stockOut") },
+  ];
+
   return (
     <div className="w-full">
+      {/* Stock status — segmented control (default: All) */}
+      <Section title={t("products.filters.byStock")}>
+        <div className="flex gap-1 rounded-lg border border-border bg-elevated p-1">
+          {stockOptions.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setFilters((f) => ({ ...f, stock: o.key }))}
+              className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                (filters.stock || "all") === o.key
+                  ? "bg-accent text-black"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </Section>
+
       {/* Category — dropdown with search + checkboxes (all selected by default) */}
       <Section title={t("products.filters.byCategory")}>
         <MultiSelectDropdown

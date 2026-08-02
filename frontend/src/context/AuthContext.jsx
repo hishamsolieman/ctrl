@@ -1,7 +1,15 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import api, { getToken, setToken } from "@/lib/api";
+import i18n from "@/i18n";
 
 const AuthContext = createContext(null);
+
+// The user's saved locale (DB) is the source of truth — apply it to the UI.
+function applyUserLocale(u) {
+  if (u?.locale && u.locale !== i18n.resolvedLanguage) {
+    i18n.changeLanguage(u.locale);
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -17,6 +25,7 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
+      applyUserLocale(data);
     } catch {
       setToken(null);
       setTok(null);
@@ -38,6 +47,7 @@ export function AuthProvider({ children }) {
     setTok(data.access_token);
     const me = await api.get("/auth/me");
     setUser(me.data);
+    applyUserLocale(me.data);
     return me.data;
   }, []);
 
@@ -47,9 +57,17 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  // Persist the user's UI language to the DB and apply it immediately.
+  const updateLocale = useCallback(async (locale) => {
+    i18n.changeLanguage(locale); // instant UI feedback
+    const { data } = await api.put("/auth/me/locale", { locale });
+    setUser(data);
+    return data;
+  }, []);
+
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAuthenticated: !!token, login, logout }}
+      value={{ user, token, loading, isAuthenticated: !!token, login, logout, updateLocale }}
     >
       {children}
     </AuthContext.Provider>

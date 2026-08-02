@@ -1,15 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import { LANGUAGES } from "@/i18n";
 import { IconUser, IconLogout } from "@/components/icons";
 
 // Clickable user chip that opens a dropdown with language selection + logout.
 export default function UserMenu() {
   const { t, i18n } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user, logout, updateLocale } = useAuth();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+
+  // Change the UI language AND persist it to the user's DB record so it
+  // renders from that value on every device/session.
+  async function selectLanguage(code) {
+    try {
+      await updateLocale(code);
+    } catch {
+      toast?.error?.(t("auth.genericError"));
+    }
+  }
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -87,7 +99,7 @@ export default function UserMenu() {
                 <button
                   key={lng.code}
                   type="button"
-                  onClick={() => i18n.changeLanguage(lng.code)}
+                  onClick={() => selectLanguage(lng.code)}
                   className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition ${
                     active
                       ? "bg-elevated text-text"

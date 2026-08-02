@@ -29,6 +29,20 @@ export async function checkProductName(name, excludeId) {
   return data.exists;
 }
 
+// A fresh, unique 8-char code (used to pre-fill the locked code field).
+export async function generateCode() {
+  const { data } = await api.get("/products/generate-code");
+  return data.code;
+}
+
+// Validates a (user-edited) code: { valid, exists }. `kind` is "product" | "variant".
+export async function checkCode(code, kind = "product", excludeId) {
+  const { data } = await api.get("/products/check-code", {
+    params: { code, kind, ...(excludeId ? { exclude_id: excludeId } : {}) },
+  });
+  return data;
+}
+
 export async function createProduct(payload) {
   const { data } = await api.post("/products", payload);
   return data;

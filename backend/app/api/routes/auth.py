@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -13,6 +14,21 @@ from app.schemas.user import UserOut
 from app.services.logging import log_action
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class LocaleUpdate(BaseModel):
+    locale: str = Field(min_length=2, max_length=10)
+
+
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        id=user.id,
+        username=user.username,
+        full_name=user.full_name,
+        role=user.role.name if user.role else "",
+        role_level=user.role.level if user.role else 0,
+        locale=user.locale,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -50,11 +66,21 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     """Resolve the current user from the token (used by the SPA after login)."""
-    return UserOut(
-        id=user.id,
-        username=user.username,
-        full_name=user.full_name,
-        role=user.role.name if user.role else "",
-        role_level=user.role.level if user.role else 0,
-        locale=user.locale,
-    )
+    return _user_out(user)
+
+
+@router.put("/me/locale", response_model=UserOut)
+def update_my_locale(
+    payload: LocaleUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Persist the user's preferred UI language so it follows them across devices."""
+    code = payload.locale.strip().lower()[:10]
+    user.locale = code
+    db.commit()
+    db.refresh(user)
+    log_action(db, action="user.locale", user_id=user.id,
+               details={"locale": code}, request=request)
+    return _user_out(user)

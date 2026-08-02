@@ -67,6 +67,19 @@ def generate_product_code(db: Session) -> str:
     raise RuntimeError("Could not generate a unique product code")
 
 
+def generate_unique_code(db: Session) -> str:
+    """Return a fresh random 8-char code unique across BOTH products and variants.
+
+    Used to pre-fill the (locked) code field in the UI so a product code never
+    collides with any existing product or variant code.
+    """
+    for _ in range(80):
+        code = _random_code()
+        if not product_code_exists(db, code) and not code_exists(db, code):
+            return code
+    raise RuntimeError("Could not generate a unique code")
+
+
 def _value_token(value_en: str) -> str:
     """A short readable token from a value name, e.g. 'Red' -> 'RED', 'XL' -> 'XL'."""
     token = re.sub(r"[^A-Z0-9]", "", (value_en or "").upper())

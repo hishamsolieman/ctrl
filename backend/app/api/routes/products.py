@@ -29,6 +29,7 @@ from app.services.codes import (
     CODE_LEN,
     code_exists,
     generate_product_code,
+    generate_unique_code,
     generate_variant_code,
     is_valid_code,
     make_variant_code,
@@ -74,6 +75,10 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 def _live_variants(product: Product) -> list[ProductVariant]:
     return [v for v in product.variants if not v.is_deleted]
+
+
+def _product_qty(product: Product) -> int:
+    return sum(int(v.quantity or 0) for v in _live_variants(product))
 
 
 def _image_id(url: str) -> int | str:
@@ -204,6 +209,7 @@ def list_products(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
     q: str | None = Query(None),
+    stock: str = Query("all", description="all | in | out"),
     category_ids: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
@@ -228,6 +234,10 @@ def list_products(
     max_price = max((float(p.price or 0) for p in all_products), default=0.0) or 1000.0
 
     rows = all_products
+    if stock == "in":
+        rows = [p for p in rows if _product_qty(p) > 0]
+    elif stock == "out":
+        rows = [p for p in rows if _product_qty(p) <= 0]
     if category_ids:
         ids = {int(x) for x in category_ids.split(",") if x.strip().isdigit()}
         if ids:
@@ -302,6 +312,39 @@ def check_product_name(
     if exclude_id is not None:
         q = q.filter(Product.id != exclude_id)
     return {"exists": db.query(q.exists()).scalar()}
+
+
+@router.get("/generate-code")
+def generate_code(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """A fresh, unique 8-char code to pre-fill the (locked) code field."""
+    return {"code": generate_unique_code(db)}
+
+
+@router.get("/check-code")
+def check_code(
+    code: str = Query(...),
+    kind: str = Query("product", description="product | variant"),
+    exclude_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Validate a (possibly user-edited) code: is it well-formed and free?
+
+    Codes are checked for global uniqueness (across both products and variants)
+    so an edited product code can never clash with an existing variant, and
+    vice-versa.
+    """
+    norm = normalize_code(code)
+    if not is_valid_code(norm):
+        return {"valid": False, "exists": False}
+    if kind == "variant":
+        exists = code_exists(db, norm, exclude_variant_id=exclude_id) or product_code_exists(db, norm)
+    else:
+        exists = product_code_exists(db, norm, exclude_product_id=exclude_id) or code_exists(db, norm)
+    return {"valid": True, "exists": exists}
 
 
 @router.get("/{product_id}")

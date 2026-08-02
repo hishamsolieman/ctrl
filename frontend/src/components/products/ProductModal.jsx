@@ -3,12 +3,55 @@ import { useTranslation } from "react-i18next";
 import Modal from "@/components/Modal";
 import CategoryModal from "@/components/categories/CategoryModal";
 import { useToast } from "@/context/ToastContext";
-import { createProduct, updateProduct, uploadImage, checkProductName, mediaUrl } from "@/lib/products";
-import { IconPlus, IconX, IconImage, IconTrash } from "@/components/icons";
+import {
+  createProduct,
+  updateProduct,
+  uploadImage,
+  checkProductName,
+  generateCode,
+  checkCode,
+  mediaUrl,
+} from "@/lib/products";
+import { IconPlus, IconX, IconImage, IconTrash, IconEdit } from "@/components/icons";
 
 let _uid = 1;
 const nextKey = () => `v${_uid++}`;
 const CODE_RE = /^[A-Za-z0-9]{8}$/;
+
+// A code input that shows the (auto-generated) code locked, with a pencil to
+// unlock it for manual editing. Text is padded/ellipsised so it never sits
+// under the pencil icon.
+function CodeField({ value, onChange, className, width = "" }) {
+  const [editing, setEditing] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (editing) ref.current?.focus();
+  }, [editing]);
+  return (
+    <div className={`relative ${width}`}>
+      <input
+        ref={ref}
+        className={`${className} truncate pe-9 font-mono uppercase ${
+          editing ? "" : "cursor-default"
+        }`}
+        value={value}
+        maxLength={8}
+        readOnly={!editing}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {!editing && (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          title="edit"
+          className="absolute end-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted transition hover:bg-elevated hover:text-accent"
+        >
+          <IconEdit width={13} height={13} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 // Keep only the {attrId: valueId} entries whose attribute is in `attrs`.
 function pickAttrs(map, attrs) {
@@ -18,6 +61,13 @@ function pickAttrs(map, attrs) {
     if (ids.has(String(k)) && v) out[String(k)] = Number(v);
   }
   return out;
+}
+
+// Format a price value to a 2-decimal string ("" stays empty).
+function money(v) {
+  if (v === "" || v == null) return "";
+  const n = Number(v);
+  return Number.isNaN(n) ? "" : n.toFixed(2);
 }
 
 function emptyVariant() {
@@ -34,9 +84,9 @@ function fromProduct(p, mode) {
     note: p.note || "",
     category_id: p.category_id ?? "",
     supplier_id: p.supplier_id ?? "",
-    supplier_price: p.supplier_price ?? "",
-    min_price: p.min_price ?? "",
-    price: p.price ?? "",
+    supplier_price: money(p.supplier_price),
+    min_price: money(p.min_price),
+    price: money(p.price),
     tags: [...(p.tags || [])],
     attributes: Object.fromEntries(
       Object.entries(p.attributes || {}).map(([k, val]) => [String(k), Number(val)])
@@ -101,6 +151,36 @@ export default function ProductModal({
     }
   }, [open, initial, mode]);
 
+  // Pre-fill fresh, unique codes for add/copy so the (locked) code field shows a
+  // real value instead of asking the user to "leave blank". Editing keeps codes.
+  useEffect(() => {
+    if (!open || mode === "edit") return;
+    let cancelled = false;
+    const count = mode === "copy" ? initial?.variants?.length || 1 : 1;
+    (async () => {
+      try {
+        const codes = await Promise.all(
+          Array.from({ length: count + 1 }, () => generateCode())
+        );
+        if (cancelled) return;
+        const productCode = codes[0];
+        const variantCodes = codes.slice(1);
+        setForm((f) => ({
+          ...f,
+          code: f.code || productCode,
+          variants: f.variants.map((v, i) =>
+            v.code ? v : { ...v, code: variantCodes[i] || "" }
+          ),
+        }));
+      } catch {
+        /* fall back to server-side auto-generation on submit */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, initial]);
+
   useEffect(() => {
     setCats(categories || []);
   }, [categories]);
@@ -132,6 +212,11 @@ export default function ProductModal({
 
   function set(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  // Normalize a price field to a 2-decimal float on blur (e.g. "400" -> "400.00").
+  function formatMoney(field) {
+    setForm((f) => ({ ...f, [field]: money(f[field]) }));
   }
 
   function onCategoryChange(value) {
@@ -178,8 +263,26 @@ export default function ProductModal({
       variants: f.variants.map((v) => (v.key === key ? { ...v, ...patch } : v)),
     }));
   }
-  function addVariant() {
-    setForm((f) => ({ ...f, variants: [...f.variants, emptyVariant()] }));
+  async function addVariant() {
+    let code = "";
+    try {
+      code = await generateCode();
+    } catch {
+      /* server will auto-generate if left blank */
+    }
+    // Default any colour attribute to the previous row's value (a new row is
+    // usually the same colour in another size); the user can still change it.
+    const colorIds = codingAttrs.filter((a) => a.type === "color").map((a) => String(a.id));
+    setForm((f) => {
+      const last = f.variants[f.variants.length - 1];
+      const attributes = {};
+      if (last) {
+        for (const id of colorIds) {
+          if (last.attributes[id] != null) attributes[id] = last.attributes[id];
+        }
+      }
+      return { ...f, variants: [...f.variants, { ...emptyVariant(), code, attributes }] };
+    });
   }
   function removeVariant(key) {
     setForm((f) => ({ ...f, variants: f.variants.filter((v) => v.key !== key) }));
@@ -305,6 +408,35 @@ export default function ProductModal({
         return;
       }
     }
+    // Codes must be unique — first within this form, then against the server
+    // (a user may have edited a locked code to one that already exists).
+    const localCodes = [];
+    if (hasVariants && form.code.trim()) localCodes.push(form.code.trim().toUpperCase());
+    for (const v of form.variants) {
+      if (v.code.trim()) localCodes.push(v.code.trim().toUpperCase());
+    }
+    if (localCodes.some((c, i) => localCodes.indexOf(c) !== i)) {
+      toast.error(t("products.modal.codeInUse"));
+      return;
+    }
+    try {
+      const checks = [];
+      if (hasVariants && form.code.trim()) {
+        checks.push(checkCode(form.code.trim(), "product", mode === "edit" ? initial?.id : undefined));
+      }
+      for (const v of form.variants) {
+        if (v.code.trim()) {
+          checks.push(checkCode(v.code.trim(), "variant", mode === "edit" ? v.id : undefined));
+        }
+      }
+      const results = await Promise.all(checks);
+      if (results.some((r) => r.exists)) {
+        toast.error(t("products.modal.codeInUse"));
+        return;
+      }
+    } catch {
+      /* non-blocking: the backend re-validates and rejects on conflict */
+    }
     // Required global attributes must be selected at the product level.
     for (const a of globalAttrs.filter((x) => x.is_required)) {
       if (!form.attributes[String(a.id)]) {
@@ -393,9 +525,7 @@ export default function ProductModal({
         {hasVariants && (
           <div>
             <label className={labelCls}>{t("products.modal.productCode")}</label>
-            <input className={inputCls + " font-mono uppercase"} value={form.code}
-              placeholder={t("products.modal.codeAuto")} maxLength={8}
-              onChange={(e) => set("code", e.target.value)} />
+            <CodeField className={inputCls} value={form.code} onChange={(v) => set("code", v)} />
           </div>
         )}
         <div>
@@ -425,18 +555,21 @@ export default function ProductModal({
         </div>
         <div>
           <label className={labelCls}>{t("products.modal.supplierPrice")}</label>
-          <input type="number" step="any" className={inputCls} value={form.supplier_price}
-            onChange={(e) => set("supplier_price", e.target.value)} />
+          <input type="number" step="0.01" min="0" className={inputCls} value={form.supplier_price}
+            onChange={(e) => set("supplier_price", e.target.value)}
+            onBlur={() => formatMoney("supplier_price")} />
         </div>
         <div>
           <label className={labelCls}>{t("products.modal.minPrice")}</label>
-          <input type="number" step="any" className={inputCls} value={form.min_price}
-            onChange={(e) => set("min_price", e.target.value)} />
+          <input type="number" step="0.01" min="0" className={inputCls} value={form.min_price}
+            onChange={(e) => set("min_price", e.target.value)}
+            onBlur={() => formatMoney("min_price")} />
         </div>
         <div>
           <label className={labelCls}>{t("products.modal.price")}</label>
-          <input type="number" step="any" className={inputCls} value={form.price}
-            onChange={(e) => set("price", e.target.value)} />
+          <input type="number" step="0.01" min="0" className={inputCls} value={form.price}
+            onChange={(e) => set("price", e.target.value)}
+            onBlur={() => formatMoney("price")} />
         </div>
       </div>
 
@@ -545,9 +678,8 @@ export default function ProductModal({
                 {form.variants.map((v) => (
                   <tr key={v.key} className="border-b border-border align-top last:border-0">
                     <td className="px-3 py-2">
-                      <input className={inputCls + " w-28 font-mono uppercase"} value={v.code}
-                        placeholder={t("products.modal.codeAuto")} maxLength={8}
-                        onChange={(e) => updateVariant(v.key, { code: e.target.value })} />
+                      <CodeField className={inputCls} width="w-32" value={v.code}
+                        onChange={(val) => updateVariant(v.key, { code: val })} />
                     </td>
                     {codingAttrs.map((attr) => {
                       const selId = v.attributes[String(attr.id)];
@@ -602,9 +734,8 @@ export default function ProductModal({
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className={labelCls}>{t("products.modal.code")}</label>
-              <input className={inputCls + " font-mono uppercase"} value={form.variants[0].code}
-                placeholder={t("products.modal.codeAuto")} maxLength={8}
-                onChange={(e) => updateVariant(form.variants[0].key, { code: e.target.value })} />
+              <CodeField className={inputCls} value={form.variants[0].code}
+                onChange={(v) => updateVariant(form.variants[0].key, { code: v })} />
             </div>
             <div>
               <label className={labelCls}>{t("products.modal.quantity")}</label>

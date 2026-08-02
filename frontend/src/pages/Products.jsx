@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
+import { useAuth } from "@/context/AuthContext";
 import {
   listProducts,
   listCategories,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/products";
 import FilterRail from "@/components/products/FilterRail";
 import ProductCard from "@/components/products/ProductCard";
+import ProductTable from "@/components/products/ProductTable";
 import ProductModal from "@/components/products/ProductModal";
 import ProductViewModal from "@/components/products/ProductViewModal";
 import ProductBulkEditModal from "@/components/products/ProductBulkEditModal";
@@ -30,6 +32,8 @@ import {
   IconFilter,
   IconChevronLeft,
   IconChevronRight,
+  IconGrid,
+  IconList,
 } from "@/components/icons";
 
 const PAGE_SIZE = 8;
@@ -51,6 +55,7 @@ function makeDefaultFilters() {
   const now = new Date();
   return {
     q: "",
+    stock: "all",
     categoryIds: [],
     // Default range: first day of the current year -> end of today.
     // Use end-of-day (not the current instant) so products created moments
@@ -68,6 +73,20 @@ export default function Products() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const toast = useToast();
+  const { user } = useAuth();
+
+  // Grid/table preference is remembered per user, in the browser.
+  const viewKey = user?.username ? `ctrl.products.view.${user.username}` : null;
+  const [view, setView] = useState("grid");
+  useEffect(() => {
+    if (!viewKey) return;
+    const saved = localStorage.getItem(viewKey);
+    if (saved === "grid" || saved === "table") setView(saved);
+  }, [viewKey]);
+  function changeView(v) {
+    setView(v);
+    if (viewKey) localStorage.setItem(viewKey, v);
+  }
 
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -120,6 +139,7 @@ export default function Products() {
     setLoading(true);
     const params = { sort: filters.sort, page, page_size: PAGE_SIZE };
     if (filters.q) params.q = filters.q;
+    if (filters.stock && filters.stock !== "all") params.stock = filters.stock;
     // Only constrain when a PARTIAL set is selected — all/none => no filter.
     if (filters.categoryIds.length && filters.categoryIds.length < categories.length) {
       params.category_ids = filters.categoryIds.join(",");
@@ -297,7 +317,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search + view toggle */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
           <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-muted">
@@ -309,6 +329,27 @@ export default function Products() {
             placeholder={t("products.searchPlaceholder")}
             className="ctrl-input py-2.5 ps-10"
           />
+        </div>
+        {/* View toggle (grid / table) — remembered per user */}
+        <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+          <button
+            onClick={() => changeView("grid")}
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+              view === "grid" ? "bg-accent text-black" : "text-muted hover:text-text"
+            }`}
+          >
+            <IconGrid width={16} height={16} />
+            <span className="hidden sm:inline">{t("products.viewGrid")}</span>
+          </button>
+          <button
+            onClick={() => changeView("table")}
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+              view === "table" ? "bg-accent text-black" : "text-muted hover:text-text"
+            }`}
+          >
+            <IconList width={16} height={16} />
+            <span className="hidden sm:inline">{t("products.viewTable")}</span>
+          </button>
         </div>
         <button onClick={() => setShowFilters((s) => !s)}
           className="ctrl-btn border border-border px-3 py-2.5 text-sm text-text hover:bg-elevated lg:hidden">
@@ -355,21 +396,39 @@ export default function Products() {
           />
         </aside>
 
-        {/* Grid + pagination */}
+        {/* Grid / table + pagination */}
         <section className={`flex min-w-0 flex-1 flex-col ${showFilters ? "hidden lg:flex" : "flex"}`}>
-          {!loading && items.length > 0 && (
+          {!loading && items.length > 0 && view === "grid" && (
             <label className="flex w-fit cursor-pointer items-center gap-2 px-4 pt-4 text-xs text-muted">
               <input type="checkbox" className="ctrl-check" checked={pageAllSelected} onChange={toggleSelectAll} />
               {t("products.selectAll")}
             </label>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className={`min-h-0 flex-1 overflow-y-auto ${view === "table" ? "" : "p-4"}`}>
             {loading ? (
-              <div className="grid h-full auto-rows-fr grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <div key={i} className="animate-pulse rounded-2xl bg-elevated" />
-                ))}
-              </div>
+              view === "table" ? (
+                <div className="space-y-2 p-4">
+                  {/* Header bar */}
+                  <div className="h-9 animate-pulse rounded-lg bg-elevated" />
+                  {/* Rows */}
+                  {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 rounded-lg border border-border/60 p-2">
+                      <div className="h-4 w-4 animate-pulse rounded bg-elevated" />
+                      <div className="h-10 w-10 animate-pulse rounded-lg bg-elevated" />
+                      <div className="h-4 flex-1 animate-pulse rounded bg-elevated" />
+                      <div className="h-4 w-24 animate-pulse rounded bg-elevated" />
+                      <div className="h-6 w-16 animate-pulse rounded-full bg-elevated" />
+                      <div className="h-8 w-24 animate-pulse rounded bg-elevated" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid h-full auto-rows-fr grid-cols-2 gap-4 p-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                    <div key={i} className="animate-pulse rounded-2xl bg-elevated" />
+                  ))}
+                </div>
+              )
             ) : items.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 py-16 text-center">
                 <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-elevated text-muted">
@@ -383,6 +442,19 @@ export default function Products() {
                   <IconPlus width={16} height={16} /> {t("products.addProduct")}
                 </button>
               </div>
+            ) : view === "table" ? (
+              <ProductTable
+                products={items}
+                currency={currency}
+                selected={selected}
+                pageAllSelected={pageAllSelected}
+                onToggleSelect={toggleSelect}
+                onToggleSelectAll={toggleSelectAll}
+                onView={setViewing}
+                onEdit={openEdit}
+                onCopy={openCopy}
+                onDelete={setToDelete}
+              />
             ) : (
               <div className="grid h-full auto-rows-fr grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {items.map((p) => (
