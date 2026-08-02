@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
@@ -38,6 +39,21 @@ from app.services.logging import log_action
 from app.services.settings import get_currency
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+
+class ProductBulkUpdate(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    category_id: int | None = None
+    supplier_id: int | None = None
+    supplier_price: float | None = None
+    min_price: float | None = None
+    price: float | None = None
+    note: str | None = None
+
+
+class ProductBulkDelete(BaseModel):
+    ids: list[int] = Field(min_length=1)
+
 
 UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -101,12 +117,14 @@ def _serialize(product: Product) -> dict[str, Any]:
         "note": product.note,
         "tags": product.tags,
         "attributes": product.attributes or {},
+        "quantity": sum(int(v.quantity or 0) for v in variants),
         "variants": [
             {
                 "id": v.id,
                 "code": v.code,
                 "attributes": v.attributes or {},
                 "images": [{"id": img.id, "url": img.url} for img in v.images],
+                "quantity": int(v.quantity or 0),
             }
             for v in variants
         ],
@@ -333,7 +351,7 @@ async def upload_image(
 _EXPORT_COLUMNS = [
     "product_code", "name", "description", "category", "supplier",
     "supplier_price", "min_price", "price", "note", "tags",
-    "global_attributes", "variant_code", "variant_attributes", "image_ids",
+    "global_attributes", "variant_code", "variant_attributes", "quantity", "image_ids",
 ]
 
 
@@ -378,6 +396,7 @@ def export_products(
                 p.note or "", json.dumps(p.tags or [], ensure_ascii=False),
                 global_txt, v.code,
                 json.dumps(_attrs_to_text(db, v.attributes), ensure_ascii=False),
+                int(v.quantity or 0),
                 # Only DB-backed image ids — never a filesystem path.
                 json.dumps([i for img in v.images if isinstance(i := _image_id(img.url), int)],
                            ensure_ascii=False),
@@ -461,9 +480,15 @@ async def import_products(
 
         def _num(key):
             try:
-                return float(row.get(key) or 0)
+                return round(float(row.get(key) or 0), 2)
             except (ValueError, TypeError):
                 return 0.0
+
+        def _int(key):
+            try:
+                return max(0, int(float(row.get(key) or 0)))
+            except (ValueError, TypeError):
+                return 0
 
         def _json(key, default):
             try:
@@ -477,22 +502,23 @@ async def import_products(
         variant_attrs = _text_to_attrs(_json("variant_attributes", {}), attr_by_name, val_by_attr)
 
         # Resolve the product by code: reuse within this import, then the DB.
-        product = None
-        if pcode and is_valid_code(pcode):
-            product = session_products.get(pcode)
-            if product is None:
-                product = (
-                    db.query(Product).filter(Product.code == pcode, Product.is_deleted.is_(False)).first()
-                )
+        # Match regardless of is_deleted — the code column is UNIQUE, so a
+        # soft-deleted product still owns its code; we revive it on re-import
+        # instead of colliding with the reserved code.
+        product = session_products.get(pcode) if pcode else None
+        first_occurrence = product is None
+        if product is None and pcode and is_valid_code(pcode):
+            product = db.query(Product).filter(Product.code == pcode).first()
 
         if product is None:
             product = Product(name=name or "Unnamed")
             _set_product_code(db, product, pcode if (pcode and is_valid_code(pcode)) else None)
             db.add(product)
             created += 1
-        else:
-            if pcode and product.code == pcode:  # only count a real DB match once
-                updated += 1
+        elif first_occurrence:
+            if product.is_deleted:
+                product.is_deleted = False  # revive a previously-deleted product
+            updated += 1
         # (Re)apply shared fields from the row.
         if name:
             product.name = name
@@ -515,6 +541,8 @@ async def import_products(
             match = db.query(ProductVariant).filter(ProductVariant.code == vcode).first()
             if match and match.product_id == product.id:
                 variant = match
+                if getattr(variant, "is_deleted", False):
+                    variant.is_deleted = False  # revive a previously-deleted variant
         if variant is None:
             variant = ProductVariant(product_id=product.id, attributes=variant_attrs)
             product.variants.append(variant)
@@ -524,6 +552,7 @@ async def import_products(
                 variant.code = make_variant_code(db, variant_attrs)
             variants += 1
         variant.attributes = variant_attrs
+        variant.quantity = _int("quantity")
 
         raw_images = _json("image_ids", None)
         if raw_images is None:
@@ -567,7 +596,11 @@ def create_product(
     db.add(product)
     db.flush()
     for vin in payload.variants:
-        variant = ProductVariant(product_id=product.id, attributes=_norm_attrs(vin.attributes))
+        variant = ProductVariant(
+            product_id=product.id,
+            attributes=_norm_attrs(vin.attributes),
+            quantity=vin.quantity,
+        )
         _set_variant_code(db, variant, vin.code)
         _apply_variant_images(variant, vin.image_urls)
         product.variants.append(variant)
@@ -609,11 +642,16 @@ def update_product(
         if vin.id and vin.id in existing:
             variant = existing[vin.id]
             variant.attributes = _norm_attrs(vin.attributes)
+            variant.quantity = vin.quantity
             _set_variant_code(db, variant, vin.code)
             _apply_variant_images(variant, vin.image_urls)
             keep_ids.add(variant.id)
         else:
-            variant = ProductVariant(product_id=product.id, attributes=_norm_attrs(vin.attributes))
+            variant = ProductVariant(
+                product_id=product.id,
+                attributes=_norm_attrs(vin.attributes),
+                quantity=vin.quantity,
+            )
             _set_variant_code(db, variant, vin.code)
             _apply_variant_images(variant, vin.image_urls)
             product.variants.append(variant)
@@ -647,6 +685,59 @@ def clear_all_products(
     log_action(db, action="product.clear_all", user_id=user.id,
                details={"count": len(rows)}, request=request)
     return {"ok": True, "count": len(rows)}
+
+
+@router.post("/bulk-update")
+def bulk_update_products(
+    payload: ProductBulkUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+):
+    """Apply the provided (enabled) fields to every selected product."""
+    sent = [f for f in payload.model_fields_set if f != "ids"]
+    if not sent:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.bulk.noFields")
+    rows = (
+        db.query(Product)
+        .filter(Product.id.in_(payload.ids), Product.is_deleted.is_(False))
+        .all()
+    )
+    for p in rows:
+        for f in sent:
+            val = getattr(payload, f)
+            if f == "note":
+                val = (val or "").strip() or None
+            elif f in ("supplier_price", "min_price", "price") and val is not None:
+                val = round(float(val), 2)
+            setattr(p, f, val)
+    db.commit()
+    log_action(db, action="product.bulk_update", user_id=user.id, entity="product",
+               details={"ids": payload.ids, "fields": sent}, request=request)
+    return {"updated": len(rows), "fields": sent}
+
+
+@router.post("/bulk-delete")
+def bulk_delete_products(
+    payload: ProductBulkDelete,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+):
+    """Soft-delete the selected products (never a physical delete)."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = (
+        db.query(Product)
+        .filter(Product.id.in_(payload.ids), Product.is_deleted.is_(False))
+        .all()
+    )
+    for p in rows:
+        p.is_deleted = True
+        p.deleted_at = now
+    db.commit()
+    log_action(db, action="product.bulk_delete", user_id=user.id, entity="product",
+               details={"deleted": [p.id for p in rows]}, request=request)
+    return {"deleted": [p.id for p in rows]}
 
 
 @router.delete("/{product_id}")

@@ -5,7 +5,7 @@ import { IconImage } from "@/components/icons";
 
 function formatPrice(v) {
   return Number(v || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
@@ -66,6 +66,8 @@ export default function ProductViewModal({ open, product, attributes, currency, 
   }
 
   const categoryName = isAr ? product.category_name_ar : product.category_name_en;
+  const totalQty = Number(product.quantity || 0);
+  const inStock = totalQty > 0;
 
   return (
     <Modal open={open} onClose={onClose} title={t("products.detail.title")} size="lg">
@@ -78,6 +80,13 @@ export default function ProductViewModal({ open, product, attributes, currency, 
                 {product.code}
               </span>
             )}
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                inStock ? "bg-accent/20 text-accent" : "bg-red-500/20 text-red-400"
+              }`}
+            >
+              {inStock ? t("products.inStock") : t("products.soldOut")}
+            </span>
           </div>
           {categoryName && <p className="mt-0.5 text-sm text-accent">{categoryName}</p>}
         </div>
@@ -144,7 +153,12 @@ export default function ProductViewModal({ open, product, attributes, currency, 
             {product.variants.map((v) => (
               <div key={v.id} className="rounded-xl border border-border p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="font-mono text-sm text-text">{v.code}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono text-sm text-text">{v.code}</span>
+                    <span className="rounded-md bg-elevated px-1.5 py-0.5 text-[11px] text-muted">
+                      {t("products.detail.quantity")}: {Number(v.quantity || 0)}
+                    </span>
+                  </span>
                   <div className="flex flex-wrap justify-end gap-2">{variantChips(v)}</div>
                 </div>
                 <div className="flex gap-2 overflow-x-auto">

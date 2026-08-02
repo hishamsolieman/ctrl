@@ -48,6 +48,44 @@ def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def patch_schema() -> None:
+    """Apply lightweight, idempotent column migrations for existing installs.
+
+    ``create_all`` never ALTERs an existing table, so schema changes to already
+    provisioned databases are handled here (guarded via information_schema).
+    """
+    with engine.begin() as conn:
+        # product_variants.quantity — per-variant on-hand stock.
+        has_qty = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'product_variants' "
+                "AND COLUMN_NAME = 'quantity'"
+            ),
+            {"db": settings.DB_NAME},
+        ).scalar()
+        if not has_qty:
+            conn.exec_driver_sql(
+                "ALTER TABLE `product_variants` "
+                "ADD COLUMN `quantity` INT NOT NULL DEFAULT 0"
+            )
+        # products price columns -> DECIMAL(12,2) for exact 2-decimal money.
+        for col in ("supplier_price", "min_price", "price"):
+            dtype = conn.execute(
+                text(
+                    "SELECT DATA_TYPE FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'products' "
+                    "AND COLUMN_NAME = :col"
+                ),
+                {"db": settings.DB_NAME, "col": col},
+            ).scalar()
+            if dtype and dtype.lower() != "decimal":
+                conn.exec_driver_sql(
+                    f"ALTER TABLE `products` "
+                    f"MODIFY COLUMN `{col}` DECIMAL(12,2) DEFAULT 0"
+                )
+
+
 def _split_statements(sql: str) -> list[str]:
     """Strip line comments/blank lines and split into individual statements."""
     lines = [
@@ -78,6 +116,8 @@ def run() -> None:
     create_database()
     print("[init] Creating tables (SQLAlchemy models)...")
     create_tables()
+    print("[init] Patching schema (idempotent migrations)...")
+    patch_schema()
     print(f"[init] Applying seeds from {DB_SQL_PATH.name}...")
     run_sql_file()
     print("[init] Done.")

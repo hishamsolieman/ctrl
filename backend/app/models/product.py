@@ -9,7 +9,9 @@
   holding only the *coding* attributes (the ones that differentiate variants).
 - ``Product.attributes`` holds the *global* (non-coding) attribute selections that
   are shared across every variant of the product.
-- Prices are float. Deletion is a SOFT delete.
+- Prices use 2-decimal precision (DECIMAL(12,2)). Each variant carries its own
+  ``quantity``; a product's quantity is the sum across its variants. Deletion is
+  a SOFT delete.
 """
 from __future__ import annotations
 
@@ -18,10 +20,10 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     JSON,
+    Numeric,
     String,
     Text,
     func,
@@ -47,9 +49,10 @@ class Product(Base):
         ForeignKey("suppliers.id"), nullable=True, index=True
     )
 
-    supplier_price: Mapped[float] = mapped_column(Float, default=0)
-    min_price: Mapped[float] = mapped_column(Float, default=0)
-    price: Mapped[float] = mapped_column(Float, default=0)
+    # Money is stored with 2-decimal precision (e.g. 400.00).
+    supplier_price: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    min_price: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    price: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
 
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -84,6 +87,8 @@ class ProductVariant(Base):
     code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     # {attribute_id: attribute_value_id}
     attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # On-hand stock for this variant; the product's quantity is the sum of these.
+    quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

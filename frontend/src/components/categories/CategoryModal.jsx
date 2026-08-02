@@ -49,8 +49,12 @@ export default function CategoryModal({ open, mode, initial, onClose, onSaved })
     setUploading(true);
     try {
       set("image_url", await uploadImage(file));
-    } catch {
-      toast.error(t("auth.genericError"));
+    } catch (err) {
+      if (err?.code === "unsupported") toast.error(t("products.modal.imageUnsupported"));
+      else {
+        const detail = err?.response?.data?.detail;
+        toast.error(detail ? t(detail, { defaultValue: t("auth.genericError") }) : t("auth.genericError"));
+      }
     } finally {
       setUploading(false);
     }
@@ -73,14 +77,15 @@ export default function CategoryModal({ open, mode, initial, onClose, onSaved })
     };
     setSaving(true);
     try {
+      let saved;
       if (mode === "edit") {
-        await updateCategory(initial.id, payload);
+        saved = await updateCategory(initial.id, payload);
         toast.success(t("categories.modal.updated"));
       } else {
-        await createCategory(payload);
+        saved = await createCategory(payload);
         toast.success(t("categories.modal.created"));
       }
-      onSaved?.();
+      onSaved?.(saved);
       onClose?.();
     } catch (err) {
       const detail = err?.response?.data?.detail;

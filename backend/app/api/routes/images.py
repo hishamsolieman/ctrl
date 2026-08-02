@@ -9,6 +9,7 @@ import base64
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
@@ -26,6 +27,25 @@ ALLOWED = {
     ".gif": "image/gif",
 }
 
+# Cached max base64 length an INSERT can carry, derived from the server's
+# `max_allowed_packet` (leaving headroom for the rest of the statement). Storing
+# a larger base64 blob would exceed the packet and drop the DB connection.
+_MAX_B64_LEN: int | None = None
+
+
+def _max_b64_len(db: Session) -> int:
+    global _MAX_B64_LEN
+    if _MAX_B64_LEN is None:
+        packet = 1_048_576
+        try:
+            row = db.execute(text("SHOW VARIABLES LIKE 'max_allowed_packet'")).fetchone()
+            if row and row[1]:
+                packet = int(row[1])
+        except Exception:  # noqa: BLE001
+            pass
+        _MAX_B64_LEN = max(packet - 16_384, 16_384)
+    return _MAX_B64_LEN
+
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def upload_image(
@@ -35,10 +55,17 @@ async def upload_image(
 ):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported image type")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.modal.imageUnsupported")
     raw = await file.read()
+    b64 = base64.b64encode(raw).decode("ascii")
+    # Guard: reject anything that would overflow the DB packet (safety net —
+    # the client already downscales images to <=512KB before upload).
+    if len(b64) > _max_b64_len(db):
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "products.errors.imageTooLarge"
+        )
     mime = file.content_type if (file.content_type or "").startswith("image/") else ALLOWED[ext]
-    img = Image(data=base64.b64encode(raw).decode("ascii"), mime=mime)
+    img = Image(data=b64, mime=mime)
     db.add(img)
     db.commit()
     db.refresh(img)

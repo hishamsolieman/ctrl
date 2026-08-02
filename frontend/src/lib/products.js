@@ -1,4 +1,5 @@
 import api from "@/lib/api";
+import { compressImage } from "@/lib/image";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:2830";
 
@@ -49,6 +50,16 @@ export async function clearAllProducts() {
   return data;
 }
 
+export async function bulkUpdateProducts(payload) {
+  const { data } = await api.post("/products/bulk-update", payload);
+  return data;
+}
+
+export async function bulkDeleteProducts(ids) {
+  const { data } = await api.post("/products/bulk-delete", { ids });
+  return data;
+}
+
 export async function uploadProductImage(file) {
   const form = new FormData();
   form.append("file", file);
@@ -59,9 +70,12 @@ export async function uploadProductImage(file) {
 }
 
 // Uploads an image into the DB (base64) and returns its "/images/{id}" reference.
+// Images are downscaled/compressed to <=512KB first so they fit within MySQL's
+// max_allowed_packet (the DB stores them base64-encoded).
 export async function uploadImage(file) {
+  const prepared = await compressImage(file, 512 * 1024);
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", prepared);
   const { data } = await api.post("/images", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
