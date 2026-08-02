@@ -20,6 +20,7 @@ export default function ProductTable({
   onEdit,
   onCopy,
   onDelete,
+  onAddToCart,
 }) {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
@@ -86,6 +87,7 @@ export default function ProductTable({
               <td className="px-3 py-2.5">
                 <div className="flex items-center justify-end gap-2">
                   <button title={t("products.addToCart")}
+                    onClick={() => onAddToCart?.(p)}
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-black transition hover:brightness-95">
                     <IconCart width={15} height={15} />
                   </button>

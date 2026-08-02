@@ -2,26 +2,52 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { posBootstrap, posRelease } from "@/lib/pos";
+import { posBootstrap, posRelease, posOpenCart } from "@/lib/pos";
+import {
+  CART_SLOTS as SLOTS,
+  MAX_CARTS as MAX_TABS,
+  cartsStorageKey,
+  firstFreeSlot,
+  blankCart as blankTab,
+} from "@/lib/carts";
 import CartWorkspace from "@/components/pos/CartWorkspace";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { IconPlus, IconX, IconCart } from "@/components/icons";
 
-const MAX_TABS = 5;
-
-const newKey = () =>
-  (crypto?.randomUUID?.() || `k${Date.now()}${Math.random().toString(16).slice(2)}`);
-
-function blankTab() {
-  return {
-    id: newKey(),
-    holdKey: newKey(),
-    items: [],
-    step: 1,
-    customer: { phone: "", name: "", existing: false },
-    paymentMethodId: null,
-    sale: null,
-  };
+// Loading placeholder that mirrors the CartWorkspace layout (steps, scan box,
+// stat cards, and item rows) so the POS doesn't flash empty while bootstrapping.
+function PosSkeleton() {
+  return (
+    <div className="ctrl-card flex min-h-0 flex-1 animate-pulse flex-col overflow-hidden">
+      <div className="flex items-center justify-center gap-4 border-b border-border px-4 py-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="h-7 w-7 rounded-full bg-elevated" />
+            <span className="hidden h-3 w-16 rounded bg-elevated sm:block" />
+            {i < 2 && <span className="h-px w-8 bg-border" />}
+          </div>
+        ))}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-4">
+        <div className="h-12 w-full rounded-xl bg-elevated" />
+        <div className="grid grid-cols-3 gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-20 rounded-xl bg-elevated" />
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 space-y-2 rounded-xl border border-border p-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="h-10 w-10 shrink-0 rounded-lg bg-elevated" />
+              <div className="h-3 flex-1 rounded bg-elevated" />
+              <div className="h-3 w-20 rounded bg-elevated" />
+              <div className="h-7 w-24 rounded bg-elevated" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function Cashier() {
@@ -29,10 +55,7 @@ export default function Cashier() {
   const toast = useToast();
   const { user } = useAuth();
 
-  const storageKey = useMemo(
-    () => `pos:tabs:${user?.username || "anon"}`,
-    [user]
-  );
+  const storageKey = useMemo(() => cartsStorageKey(user?.username), [user]);
 
   const [tabs, setTabs] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -52,12 +75,22 @@ export default function Cashier() {
       restored = null;
     }
     if (Array.isArray(restored) && restored.length) {
-      setTabs(restored);
-      setActiveId(restored[0].id);
+      // Backfill/normalize slots for tabs persisted before slots existed (or with
+      // duplicate/invalid slots), keeping any valid unique slot in order.
+      const used = new Set();
+      const normalized = restored.map((tb) => {
+        let s = tb.slot;
+        if (!SLOTS.includes(s) || used.has(s)) s = SLOTS.find((x) => !used.has(x)) || "A";
+        used.add(s);
+        return { ...tb, slot: s };
+      });
+      setTabs(normalized);
+      setActiveId(normalized[0].id);
     } else {
       const t0 = blankTab();
       setTabs([t0]);
       setActiveId(t0.id);
+      posOpenCart(t0.holdKey).catch(() => {});
     }
   }, [storageKey]);
 
@@ -90,9 +123,10 @@ export default function Cashier() {
       toast.info(t("pos.maxTabs"));
       return;
     }
-    const nt = blankTab();
+    const nt = blankTab(firstFreeSlot(tabs));
     setTabs((prev) => [...prev, nt]);
     setActiveId(nt.id);
+    posOpenCart(nt.holdKey).catch(() => {});
   };
 
   async function reallyClose(tab) {
@@ -122,10 +156,9 @@ export default function Cashier() {
 
   const activeTab = tabs.find((tb) => tb.id === activeId) || tabs[0];
 
-  const tabLabel = (tab, idx) => {
-    const n = idx + 1;
+  const tabLabel = (tab) => {
     const count = tab.items.reduce((s, i) => s + (i.quantity || 0), 0);
-    return { title: t("pos.tab", { n }), count };
+    return { title: t("pos.tab", { n: tab.slot }), count };
   };
 
   return (
@@ -140,8 +173,8 @@ export default function Cashier() {
 
       {/* Tab bar */}
       <div className="flex items-center gap-2 overflow-x-auto">
-        {tabs.map((tab, idx) => {
-          const { title, count } = tabLabel(tab, idx);
+        {tabs.map((tab) => {
+          const { title, count } = tabLabel(tab);
           const active = tab.id === activeTab?.id;
           return (
             <div
@@ -188,14 +221,16 @@ export default function Cashier() {
         )}
       </div>
 
-      {/* Active cart workspace */}
-      {activeTab && boot && (
+      {/* Active cart workspace (skeleton until bootstrap data arrives) */}
+      {activeTab && boot ? (
         <CartWorkspace
           key={activeTab.id}
           tab={activeTab}
           boot={boot}
           patch={(partial) => patchTab(activeTab.id, partial)}
         />
+      ) : (
+        <PosSkeleton />
       )}
 
       <ConfirmDialog

@@ -1,12 +1,14 @@
 """Completed POS sale (invoice) and its line items.
 
-A sale snapshots the sold price/name at the moment of checkout so later product
-edits never rewrite history. Stock is reduced from the variant on completion."""
+Line prices/names are snapshotted at checkout so later product edits never
+rewrite history. Customer + payment method are referenced by FK (their current
+values are shown on the invoice). Stock is reduced from the variant on completion.
+"""
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -26,15 +28,19 @@ class Sale(Base):
         ForeignKey("payment_methods.id"), nullable=True
     )
 
-    # Snapshots of customer + payment for the printed invoice.
-    customer_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
-    customer_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    payment_method: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Customer + payment are read through these FK relationships (no snapshots).
+    customer: Mapped["Customer"] = relationship("Customer", lazy="joined")
+    payment: Mapped["PaymentMethod"] = relationship("PaymentMethod", lazy="joined")
 
     item_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     subtotal: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     discount: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     total: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
+
+    # Cash handling: amount tendered, exact change, and "raw" (rounded-up) change.
+    paid_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
+    change_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
+    change_raw: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -60,7 +66,14 @@ class SaleItem(Base):
 
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Snapshot of the sold attributes (labels + hex) so later attribute edits
+    # never rewrite this invoice's history. Not a foreign key by design.
+    attributes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # unit_price = the price actually charged (may be discounted); list_price =
+    # the catalog price at sale time. subtotal on the sale is Σ list·qty (gross),
+    # discount is Σ (list−sold)·qty, and total is the net (Σ sold·qty).
     unit_price: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
+    list_price: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     min_price: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     line_total: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)

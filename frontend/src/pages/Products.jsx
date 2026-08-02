@@ -13,6 +13,15 @@ import {
   exportProducts,
   importProducts,
 } from "@/lib/products";
+import { posScan, posOpenCart } from "@/lib/pos";
+import {
+  loadCarts,
+  saveCarts,
+  blankCart,
+  mapCartLine,
+  lineNeedsFinalize,
+  firstFreeSlot,
+} from "@/lib/carts";
 import FilterRail from "@/components/products/FilterRail";
 import ProductCard from "@/components/products/ProductCard";
 import ProductTable from "@/components/products/ProductTable";
@@ -113,6 +122,8 @@ export default function Products() {
   const [selected, setSelected] = useState({});
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  // When >1 POS cart is open, ask which one to add a product to.
+  const [cartPick, setCartPick] = useState(null); // { product, carts }
 
   const importRef = useRef(null);
   const catInit = useRef(false);
@@ -285,6 +296,56 @@ export default function Products() {
     }
   }
 
+  // ---- Add to (POS) cart ----
+  // Push a product into an open cart as a *flexible* line (added by product
+  // code), so the cashier finalizes the variant in the POS. If more than one
+  // cart is open, ask which one first.
+  async function addToCart(product, cartArg) {
+    if (Number(product.quantity || 0) <= 0) {
+      toast.error(t("products.addSoldOut"));
+      return;
+    }
+    let carts = loadCarts(user?.username);
+    let target = cartArg ? carts.find((c) => c.id === cartArg.id) : carts[0];
+    if (!target) {
+      // No cart yet — start a fresh one so POS shows it on open.
+      target = blankCart(carts.length ? firstFreeSlot(carts) : "A");
+      carts = [...carts, target];
+      posOpenCart(target.holdKey).catch(() => {});
+    }
+    try {
+      const line = await posScan(target.holdKey, product.code);
+      carts = carts.map((c) => {
+        if (c.id !== target.id) return c;
+        const found = c.items.find((i) => i.stock_id === line.stock_id);
+        const items = found
+          ? c.items.map((i) =>
+              i.stock_id === line.stock_id
+                ? {
+                    ...i,
+                    quantity: line.quantity,
+                    available: line.available,
+                    on_hand: line.on_hand,
+                    siblings: line.siblings || i.siblings,
+                  }
+                : i
+            )
+          : [...c.items, { ...mapCartLine(line), unit_price: line.price, pending: lineNeedsFinalize(line) }];
+        return { ...c, items };
+      });
+      saveCarts(user?.username, carts);
+      toast.success(t("products.addedToCart", { cart: t("pos.tab", { n: target.slot }) }));
+    } catch (err) {
+      toast.error(t(err?.response?.data?.detail || "auth.genericError"));
+    }
+  }
+
+  function onAddToCart(product) {
+    const carts = loadCarts(user?.username);
+    if (carts.length > 1) setCartPick({ product, carts });
+    else addToCart(product, carts[0] || null);
+  }
+
   const openAdd = () => setModal({ open: true, mode: "add", product: null });
   const openEdit = (p) => setModal({ open: true, mode: "edit", product: p });
   const openCopy = (p) => setModal({ open: true, mode: "copy", product: p });
@@ -454,6 +515,7 @@ export default function Products() {
                 onEdit={openEdit}
                 onCopy={openCopy}
                 onDelete={setToDelete}
+                onAddToCart={onAddToCart}
               />
             ) : (
               <div className="grid h-full auto-rows-fr grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -468,6 +530,7 @@ export default function Products() {
                     onEdit={openEdit}
                     onCopy={openCopy}
                     onDelete={setToDelete}
+                    onAddToCart={onAddToCart}
                   />
                 ))}
               </div>
@@ -565,6 +628,53 @@ export default function Products() {
         confirmLabel={t("products.bulk.confirm")}
         cancelLabel={t("products.bulk.cancel")}
       />
+
+      {/* Choose which open cart to add the product to (only when >1 cart). */}
+      {cartPick && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setCartPick(null)}
+        >
+          <div
+            className="ctrl-card w-full max-w-sm p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-text">{t("products.chooseCart.title")}</h3>
+              <button
+                onClick={() => setCartPick(null)}
+                className="rounded-md p-1 text-muted hover:bg-elevated hover:text-text"
+              >
+                <IconX width={16} height={16} />
+              </button>
+            </div>
+            <p className="mt-1 truncate text-sm text-muted">
+              {t("products.chooseCart.body", { name: cartPick.product.name })}
+            </p>
+            <div className="mt-4 space-y-2">
+              {cartPick.carts.map((c) => {
+                const count = (c.items || []).reduce((s, i) => s + (i.quantity || 0), 0);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      const p = cartPick.product;
+                      setCartPick(null);
+                      addToCart(p, c);
+                    }}
+                    className="flex w-full items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-sm text-text transition hover:border-accent hover:bg-elevated"
+                  >
+                    <span className="font-medium">{t("pos.tab", { n: c.slot })}</span>
+                    <span className="text-xs text-muted">
+                      {t("products.chooseCart.items", { count })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

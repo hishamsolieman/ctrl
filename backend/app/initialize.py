@@ -152,6 +152,36 @@ def patch_schema() -> None:
                 "ADD INDEX `ix_sale_items_stock_id` (`stock_id`)"
             )
 
+        # sale_items.attributes — JSON snapshot of the sold attributes.
+        if not _has_col("sale_items", "attributes"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `sale_items` ADD COLUMN `attributes` JSON NULL AFTER `name`"
+            )
+
+        # sale_items.list_price — catalog price at sale time (subtotal = Σ list·qty).
+        if not _has_col("sale_items", "list_price"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `sale_items` "
+                "ADD COLUMN `list_price` DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER `unit_price`"
+            )
+            # Backfill: assume no discount for historical rows (list = sold price).
+            conn.exec_driver_sql(
+                "UPDATE `sale_items` SET `list_price` = `unit_price` WHERE `list_price` = 0"
+            )
+
+        # sales cash-handling columns: amount paid + exact/raw change.
+        for col in ("paid_amount", "change_amount", "change_raw"):
+            if not _has_col("sales", col):
+                conn.exec_driver_sql(
+                    f"ALTER TABLE `sales` "
+                    f"ADD COLUMN `{col}` DECIMAL(12,2) NOT NULL DEFAULT 0"
+                )
+
+        # Drop legacy sales snapshot columns — customer + payment are read via FK.
+        for col in ("customer_name", "customer_phone", "payment_method"):
+            if _has_col("sales", col):
+                conn.exec_driver_sql(f"ALTER TABLE `sales` DROP COLUMN `{col}`")
+
         # Backfill one stock unit per existing variant that has none, carrying the
         # legacy per-variant quantity. Idempotent via NOT EXISTS.
         conn.exec_driver_sql(
@@ -166,6 +196,13 @@ def patch_schema() -> None:
         if _has_col("sale_holds", "variant_id"):
             conn.exec_driver_sql("DROP TABLE `sale_holds`")
             Base.metadata.tables["sale_holds"].create(bind=conn)
+
+        # sale_holds.flexible — marks a product-code-scanned line (coding editable).
+        if not _has_col("sale_holds", "flexible"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `sale_holds` "
+                "ADD COLUMN `flexible` TINYINT(1) NOT NULL DEFAULT 0 AFTER `quantity`"
+            )
 
 
 def _split_statements(sql: str) -> list[str]:

@@ -30,13 +30,15 @@ export async function posSetQty(holdKey, stockId, quantity) {
   return data;
 }
 
-// Switch a line to a sibling stock unit (same code, different non-coding attrs).
-// `attributes` is the full target non-coding combo {attr_id: value_id}.
-export async function posSwitch(holdKey, stockId, attributes) {
+// Switch a line to another in-stock unit for a changed attribute. `attributes`
+// is the full target combo {attr_id: value_id}; `anchor` is the attribute the
+// cashier just changed (kept fixed while other values adapt to availability).
+export async function posSwitch(holdKey, stockId, attributes, anchor) {
   const { data } = await api.post("/pos/holds/switch", {
     hold_key: holdKey,
     stock_id: stockId,
     attributes,
+    ...(anchor != null ? { anchor: Number(anchor) } : {}),
   });
   return data;
 }
@@ -52,5 +54,11 @@ export async function posRelease(holdKey, stockId) {
 
 export async function posCheckout(payload) {
   const { data } = await api.post("/pos/checkout", payload);
+  return data;
+}
+
+// Log that a cashier opened a new cart tab (best-effort; no server state).
+export async function posOpenCart(holdKey) {
+  const { data } = await api.post("/pos/cart/open", { hold_key: holdKey });
   return data;
 }

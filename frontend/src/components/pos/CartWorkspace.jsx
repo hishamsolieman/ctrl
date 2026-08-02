@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
+import { useBrand } from "@/context/BrandContext";
 import { posScan, posSetQty, posSwitch, posRelease, posCheckout, lookupCustomer } from "@/lib/pos";
+import { mapCartLine } from "@/lib/carts";
 import { mediaUrl } from "@/lib/products";
 import {
   IconSearch,
@@ -11,6 +13,7 @@ import {
   IconCheck,
   IconUser,
   IconWallet,
+  IconDiscount,
   IconImage,
   IconChevronLeft,
   IconChevronRight,
@@ -20,6 +23,20 @@ const newKey = () =>
   crypto?.randomUUID?.() || `k${Date.now()}${Math.random().toString(16).slice(2)}`;
 
 const STEPS = ["pos.step.cart", "pos.step.customer", "pos.step.invoice"];
+
+// Canonicalize a phone number for display (mirrors the backend): local Egyptian
+// numbers (0xxxxxxxxxx) become +20xxxxxxxxxx; a 00 prefix becomes +; + is kept.
+function normalizePhone(raw) {
+  const p = (raw || "").trim();
+  if (!p) return "";
+  const plus = p.startsWith("+");
+  const digits = p.replace(/\D/g, "");
+  if (!digits) return "";
+  if (plus) return "+" + digits;
+  if (digits.startsWith("00")) return "+" + digits.slice(2);
+  if (digits.startsWith("0")) return "+20" + digits.slice(1);
+  return "+" + digits;
+}
 
 function StatCard({ Icon, label, value, tone }) {
   const tones = {
@@ -47,13 +64,39 @@ export default function CartWorkspace({ tab, boot, patch }) {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const toast = useToast();
+  const brand = useBrand();
 
   const currency = boot?.currency || "";
   const methods = boot?.payment_methods || [];
 
+  const selectedMethod = useMemo(
+    () => methods.find((m) => m.id === tab.paymentMethodId) || null,
+    [methods, tab.paymentMethodId]
+  );
+  const isCash = (selectedMethod?.code || "").toLowerCase() === "cash";
+
+  // Phone validation regex comes from the DB config (via /pos/bootstrap). Empty
+  // phone is allowed (optional); the number is validated in its canonical form.
+  const phoneValid = useCallback(
+    (raw) => {
+      const p = normalizePhone(raw);
+      if (!p) return true;
+      const rx = boot?.phone_regex;
+      if (!rx) return true;
+      try {
+        return new RegExp(rx).test(p);
+      } catch {
+        return true;
+      }
+    },
+    [boot]
+  );
+
   const [scanValue, setScanValue] = useState("");
   const [priceDraft, setPriceDraft] = useState({});
   const [qtyDraft, setQtyDraft] = useState({});
+  const [editPrice, setEditPrice] = useState(null); // stock_id whose price is being edited
+  const [editQty, setEditQty] = useState(null); // stock_id whose qty is being edited
   const [busy, setBusy] = useState(false);
   const scanRef = useRef(null);
 
@@ -69,6 +112,32 @@ export default function CartWorkspace({ tab, boot, patch }) {
     [isAr, currency]
   );
 
+  // Plain number with 2 decimals (no currency) — for the editable unit-price label.
+  const num2 = useCallback(
+    (n) =>
+      Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    [isAr]
+  );
+
+  // Union of all attributes (coding + non-coding) across cart lines. Each becomes
+  // its own table column; a row shows a locked value (coding) or a dropdown
+  // (non-coding, editable), or "—" when the line doesn't have that attribute.
+  const attrColumns = useMemo(() => {
+    const map = new Map();
+    for (const it of items) {
+      for (const a of it.coding_attrs || [])
+        if (!map.has(a.attr_id))
+          map.set(a.attr_id, { attr_id: a.attr_id, name_en: a.name_en, name_ar: a.name_ar, type: a.type });
+      for (const a of it.nc_attrs || [])
+        if (!map.has(a.attr_id))
+          map.set(a.attr_id, { attr_id: a.attr_id, name_en: a.name_en, name_ar: a.name_ar, type: a.type });
+    }
+    return [...map.values()];
+  }, [items]);
+
   const stats = useMemo(() => {
     let count = 0;
     let discount = 0;
@@ -81,6 +150,18 @@ export default function CartWorkspace({ tab, boot, patch }) {
     }
     return { count, discount: Math.max(0, discount), total };
   }, [items]);
+
+  // Cash payment: never accept less than the invoice (auto-bump to total). The
+  // "raw" change rounds the invoice UP to the whole unit; the exact change uses
+  // the real total — both are shown to the cashier.
+  const cash = useMemo(() => {
+    const total = stats.total;
+    const typed = Number(tab.paidAmount);
+    const paid = Math.max(isFinite(typed) ? typed : 0, total);
+    const exact = Math.max(0, paid - total);
+    const raw = Math.max(0, paid - Math.ceil(total));
+    return { total, paid, exact, raw };
+  }, [stats.total, tab.paidAmount]);
 
   const focusScan = useCallback(() => {
     setTimeout(() => scanRef.current?.focus(), 0);
@@ -112,7 +193,9 @@ export default function CartWorkspace({ tab, boot, patch }) {
     }
     const h = setTimeout(async () => {
       try {
-        const r = await lookupCustomer(phone);
+        // Search by the canonical form so 01xxxxxxxxx and +201xxxxxxxxx match the
+        // same stored (+20) customer.
+        const r = await lookupCustomer(normalizePhone(phone) || phone);
         patch((tb) => ({
           customer: {
             ...tb.customer,
@@ -129,24 +212,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
   }, [tab.customer.phone]);
 
   // ---- Item operations (cart lines are keyed by stock_id) ----
-  const mapLine = (line) => ({
-    stock_id: line.stock_id,
-    variant_id: line.variant_id,
-    product_id: line.product_id,
-    code: line.code,
-    name: line.name,
-    variant_en: line.variant_en,
-    variant_ar: line.variant_ar,
-    image: line.image,
-    price: line.price,
-    min_price: line.min_price,
-    quantity: line.quantity,
-    available: line.available,
-    on_hand: line.on_hand,
-    nc_attrs: line.nc_attrs || [],
-    selected: line.selected || {},
-    siblings: line.siblings || [],
-  });
+  const mapLine = mapCartLine;
 
   const upsertLine = (line) =>
     patch((tb) => {
@@ -160,6 +226,8 @@ export default function CartWorkspace({ tab, boot, patch }) {
                   quantity: line.quantity,
                   available: line.available,
                   on_hand: line.on_hand,
+                  coding_editable: !!line.coding_editable,
+                  coding_attrs: line.coding_attrs || [],
                   nc_attrs: line.nc_attrs || [],
                   selected: line.selected || {},
                   siblings: line.siblings || [],
@@ -216,16 +284,19 @@ export default function CartWorkspace({ tab, boot, patch }) {
     }
   }
 
-  // Switch a line's non-coding attribute (e.g. size) to an in-stock sibling.
+  // Switch a line's attribute (coding color or non-coding size) to an in-stock
+  // combination. `attrId` is the anchor the cashier just changed.
   async function doSwitch(item, attrId, valueId) {
     if (!valueId) return;
     const target = { ...(item.selected || {}), [String(attrId)]: Number(valueId) };
     try {
-      const line = await posSwitch(tab.holdKey, item.stock_id, target);
+      const line = await posSwitch(tab.holdKey, item.stock_id, target, attrId);
       if (line.capped) toast.info(t("pos.qtyCapped", { count: line.quantity }));
       patch((tb) => ({
         items: tb.items.map((i) =>
-          i.stock_id === item.stock_id ? { ...mapLine(line), unit_price: i.unit_price } : i
+          i.stock_id === item.stock_id
+            ? { ...mapLine(line), unit_price: i.unit_price, pending: i.pending }
+            : i
         ),
       }));
     } catch (err) {
@@ -233,6 +304,16 @@ export default function CartWorkspace({ tab, boot, patch }) {
     } finally {
       focusScan();
     }
+  }
+
+  // A line pushed from the product list stays `pending` until the cashier
+  // confirms its variant here; checkout is blocked while any line is pending.
+  function confirmVariant(item) {
+    patch((tb) => ({
+      items: tb.items.map((i) =>
+        i.stock_id === item.stock_id ? { ...i, pending: false } : i
+      ),
+    }));
   }
 
   async function removeItem(item) {
@@ -252,6 +333,11 @@ export default function CartWorkspace({ tab, boot, patch }) {
     });
     let v = Number(raw);
     if (!isFinite(v) || v < 0) v = item.unit_price;
+    // Cap at the product's list price — the cashier may only discount, never raise it.
+    if (v > item.price) {
+      v = item.price;
+      toast.info(t("pos.priceCapped", { name: item.name }));
+    }
     if (v < item.min_price) {
       v = item.min_price;
       toast.info(t("pos.priceAdjusted", { name: item.name }));
@@ -276,15 +362,31 @@ export default function CartWorkspace({ tab, boot, patch }) {
   }
 
   // ---- Wizard nav ----
+  const pendingLine = items.find((i) => i.pending);
+
   function goNextFromCart() {
     if (!items.length) return toast.info(t("pos.cartEmpty"));
+    if (pendingLine) return toast.error(t("pos.finalizeRequired", { name: pendingLine.name }));
     patch({ step: 2 });
   }
 
-  async function doCheckout() {
+  // Step 2 -> 3 only builds the invoice PREVIEW; the sale is not created yet.
+  function goToInvoice() {
     if (!items.length) return toast.info(t("pos.cartEmpty"));
+    if (pendingLine) return toast.error(t("pos.finalizeRequired", { name: pendingLine.name }));
     if (!tab.customer.name.trim()) return toast.error(t("pos.customer.nameRequired"));
     if (!tab.paymentMethodId) return toast.error(t("pos.payment.required"));
+    if (!phoneValid(tab.customer.phone)) return toast.error(t("pos.errors.invalidPhone"));
+    patch({ step: 3 });
+  }
+
+  // Actually create the sale (only from the invoice step, on "Checkout").
+  async function doCheckout() {
+    if (!items.length) return toast.info(t("pos.cartEmpty"));
+    if (pendingLine) return toast.error(t("pos.finalizeRequired", { name: pendingLine.name }));
+    if (!tab.customer.name.trim()) return toast.error(t("pos.customer.nameRequired"));
+    if (!tab.paymentMethodId) return toast.error(t("pos.payment.required"));
+    if (!phoneValid(tab.customer.phone)) return toast.error(t("pos.errors.invalidPhone"));
     setBusy(true);
     try {
       const sale = await posCheckout({
@@ -299,9 +401,13 @@ export default function CartWorkspace({ tab, boot, patch }) {
           quantity: i.quantity,
           unit_price: i.unit_price,
         })),
+        ...(isCash ? { paid_amount: cash.paid } : {}),
       });
-      patch({ sale, step: 3 });
       toast.success(t("pos.invoice.done"));
+      // "Skip invoice" → go straight to a fresh cart (no invoice screen).
+      // Otherwise keep the completed invoice visible for printing / review.
+      if (tab.skipInvoice) newSale();
+      else patch({ sale });
     } catch (err) {
       toast.error(t(err?.response?.data?.detail || "auth.genericError"));
     } finally {
@@ -315,6 +421,8 @@ export default function CartWorkspace({ tab, boot, patch }) {
       step: 1,
       customer: { phone: "", name: "", existing: false },
       paymentMethodId: null,
+      paidAmount: "",
+      skipInvoice: false,
       sale: null,
       holdKey: newKey(),
     });
@@ -322,6 +430,69 @@ export default function CartWorkspace({ tab, boot, patch }) {
 
   const setCustomer = (partial) =>
     patch((tb) => ({ customer: { ...tb.customer, ...partial } }));
+
+  // Resolve a cart line's attributes (coding + selected non-coding) into the same
+  // shape the backend snapshots, so the preview and the committed invoice match.
+  const lineAttrs = (item) => {
+    const out = [];
+    for (const a of item.coding_attrs || [])
+      out.push({ name_en: a.name_en, name_ar: a.name_ar, value_en: a.value_en, value_ar: a.value_ar, hex: a.hex });
+    for (const a of item.nc_attrs || []) {
+      const cur = item.selected?.[String(a.attr_id)];
+      const v = (a.values || []).find((x) => Number(x.value_id) === Number(cur));
+      if (v) out.push({ name_en: a.name_en, name_ar: a.name_ar, value_en: v.value_en, value_ar: v.value_ar, hex: v.hex });
+    }
+    return out;
+  };
+
+  const committed = !!tab.sale;
+  const inv = committed
+    ? {
+        invoice_no: tab.sale.invoice_no,
+        created_at: tab.sale.created_at,
+        customer_name: tab.sale.customer_name,
+        customer_phone: tab.sale.customer_phone,
+        payment_method: isAr ? tab.sale.payment_method_ar : tab.sale.payment_method_en,
+        items: (tab.sale.items || []).map((i) => {
+          // Rows show the catalog (list) price; the discount line bridges to the net.
+          const list = i.list_price ?? i.unit_price;
+          return {
+            name: i.name,
+            attributes: i.attributes || [],
+            quantity: i.quantity,
+            unit_price: list,
+            line_total: (list || 0) * (i.quantity || 0),
+          };
+        }),
+        subtotal: tab.sale.subtotal,
+        discount: tab.sale.discount,
+        total: tab.sale.total,
+        paid: tab.sale.paid_amount,
+        changeExact: tab.sale.change_amount,
+        changeRaw: tab.sale.change_raw,
+      }
+    : {
+        invoice_no: null,
+        created_at: new Date().toISOString(),
+        customer_name: tab.customer.name,
+        customer_phone: normalizePhone(tab.customer.phone),
+        payment_method: selectedMethod ? (isAr ? selectedMethod.name_ar : selectedMethod.name_en) : "",
+        items: items.map((i) => ({
+          name: i.name,
+          attributes: lineAttrs(i),
+          quantity: i.quantity,
+          // Rows show the catalog (list) price; discount bridges to the net total.
+          unit_price: i.price,
+          line_total: (i.price || 0) * (i.quantity || 0),
+        })),
+        // Subtotal is gross (before discount); total is net (after discount).
+        subtotal: stats.total + stats.discount,
+        discount: stats.discount,
+        total: stats.total,
+        paid: cash.paid,
+        changeExact: cash.exact,
+        changeRaw: cash.raw,
+      };
 
   const inputSm = "ctrl-input-sm w-full text-sm";
 
@@ -384,7 +555,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
             {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
               <StatCard tone="sky" Icon={IconCart} label={t("pos.stats.items")} value={stats.count} />
-              <StatCard tone="amber" Icon={IconWallet} label={t("pos.stats.discount")} value={money(stats.discount)} />
+              <StatCard tone="amber" Icon={IconDiscount} label={t("pos.stats.discount")} value={money(stats.discount)} />
               <StatCard tone="emerald" Icon={IconWallet} label={t("pos.stats.total")} value={money(stats.total)} />
             </div>
 
@@ -398,29 +569,41 @@ export default function CartWorkspace({ tab, boot, patch }) {
                   <p className="text-sm">{t("pos.empty")}</p>
                 </div>
               ) : (
-                <div className="max-h-full overflow-y-auto">
+                <div className="max-h-full overflow-auto">
                   <table className="ctrl-table w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-surface">
                       <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
                         <th className="w-14 px-3 py-2.5" />
                         <th className="px-3 py-2.5 text-start font-medium">{t("pos.table.code")}</th>
+                        <th className="px-3 py-2.5 text-center font-medium">{t("pos.table.category")}</th>
                         <th className="px-3 py-2.5 text-start font-medium">{t("pos.table.name")}</th>
-                        <th className="px-3 py-2.5 text-start font-medium">{t("pos.table.price")}</th>
+                        {attrColumns.map((col) => (
+                          <th key={col.attr_id} className="px-3 py-2.5 text-center font-medium">
+                            {isAr ? col.name_ar : col.name_en}
+                          </th>
+                        ))}
+                        <th className="px-3 py-2.5 text-center font-medium">{t("pos.table.price")}</th>
                         <th className="px-3 py-2.5 text-center font-medium">{t("pos.table.qty")}</th>
                         <th className="px-3 py-2.5 text-end font-medium">{t("pos.table.total")}</th>
-                        <th className="w-10 px-2 py-2.5" />
+                        <th className="w-16 px-2 py-2.5" />
                       </tr>
                     </thead>
                     <tbody>
                       {items.map((item) => {
-                        const label = (isAr ? item.variant_ar : item.variant_en) || "";
                         const priceVal = priceDraft[item.stock_id] ?? String(item.unit_price);
                         const qtyVal = qtyDraft[item.stock_id] ?? String(item.quantity);
                         const atMax = item.quantity >= item.available;
+                        const editing = editPrice === item.stock_id;
+                        const editingQty = editQty === item.stock_id;
                         return (
-                          <tr key={item.stock_id} className="border-b border-border/60 last:border-0">
+                          <tr
+                            key={item.stock_id}
+                            className={`border-b border-border/60 last:border-0 ${
+                              item.pending ? "bg-amber-500/10" : ""
+                            }`}
+                          >
                             <td className="px-3 py-2">
-                              <div className="h-10 w-10 overflow-hidden rounded-lg border border-border bg-elevated">
+                              <div className="mx-auto h-10 w-10 overflow-hidden rounded-lg border border-border bg-elevated">
                                 {item.image ? (
                                   <img src={mediaUrl(item.image)} alt="" className="h-full w-full object-cover" />
                                 ) : (
@@ -431,89 +614,198 @@ export default function CartWorkspace({ tab, boot, patch }) {
                               </div>
                             </td>
                             <td className="px-3 py-2 font-mono text-xs text-muted">{item.code}</td>
-                            <td className="px-3 py-2">
-                              <p className="font-medium text-text">{item.name}</p>
-                              {/* Coding attributes are baked into the code — locked. */}
-                              {label && <p className="text-xs text-muted">{label}</p>}
-                              {/* Non-coding attributes can be switched to in-stock siblings. */}
-                              {(item.nc_attrs || []).length > 0 && (
-                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                  {item.nc_attrs.map((a) => {
-                                    const cur = item.selected?.[String(a.attr_id)] ?? "";
-                                    const curVal = a.values.find((val) => Number(val.value_id) === Number(cur));
-                                    return (
-                                      <span key={a.attr_id} className="flex items-center gap-1 text-xs">
-                                        <span className="text-muted">
-                                          {isAr ? a.name_ar : a.name_en}:
-                                        </span>
-                                        {a.type === "color" && curVal?.hex && (
-                                          <span className="h-3 w-3 shrink-0 rounded-full border border-border"
-                                            style={{ backgroundColor: curVal.hex }} />
-                                        )}
-                                        <select
-                                          value={cur}
-                                          onChange={(e) => doSwitch(item, a.attr_id, e.target.value)}
-                                          className="ctrl-input-sm ctrl-select h-7 py-0 text-xs"
-                                        >
-                                          {a.values.map((val) => {
-                                            const ok = optionAvailable(item, a.attr_id, val.value_id);
-                                            return (
-                                              <option key={val.value_id} value={val.value_id} disabled={!ok}>
-                                                {(isAr ? val.value_ar : val.value_en) +
-                                                  (ok ? "" : ` — ${t("pos.table.soldOut")}`)}
-                                              </option>
-                                            );
-                                          })}
-                                        </select>
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                            <td className="px-3 py-2 text-center text-xs text-muted">
+                              {(isAr ? item.category_ar : item.category_en) || "—"}
                             </td>
                             <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                min={item.min_price}
-                                step="0.01"
-                                dir="ltr"
-                                value={priceVal}
-                                onChange={(e) =>
-                                  setPriceDraft((d) => ({ ...d, [item.stock_id]: e.target.value }))
-                                }
-                                onBlur={(e) => commitPrice(item, e.target.value)}
-                                onKeyDown={(e) => e.key === "Enter" && commitPrice(item, e.target.value)}
-                                className={`${inputSm} w-24`}
-                              />
+                              <p className="font-medium text-text">{item.name}</p>
+                            </td>
+                            {attrColumns.map((col) => {
+                              const coding = (item.coding_attrs || []).find(
+                                (a) => a.attr_id === col.attr_id
+                              );
+                              const nc = (item.nc_attrs || []).find((a) => a.attr_id === col.attr_id);
+                              // Editable when it's a non-coding attribute, or a coding
+                              // attribute on a flexible (product-scanned) line.
+                              const editable =
+                                nc || (coding && coding.editable && coding.values ? coding : null);
+                              if (editable) {
+                                const cur = item.selected?.[String(editable.attr_id)] ?? "";
+                                const curVal = (editable.values || []).find(
+                                  (val) => Number(val.value_id) === Number(cur)
+                                );
+                                return (
+                                  <td key={col.attr_id} className="px-3 py-2">
+                                    <div className="mx-auto flex w-fit items-center gap-1.5">
+                                      {editable.type === "color" && curVal?.hex && (
+                                        <span
+                                          className="h-3 w-3 shrink-0 rounded-full border border-border"
+                                          style={{ backgroundColor: curVal.hex }}
+                                        />
+                                      )}
+                                      <select
+                                        value={cur}
+                                        onChange={(e) =>
+                                          doSwitch(item, editable.attr_id, e.target.value)
+                                        }
+                                        className="ctrl-input-sm ctrl-select h-7 py-0 text-xs"
+                                      >
+                                        {(editable.values || []).map((val) => {
+                                          const ok =
+                                            val.available ??
+                                            optionAvailable(item, editable.attr_id, val.value_id);
+                                          return (
+                                            <option
+                                              key={val.value_id}
+                                              value={val.value_id}
+                                              disabled={!ok}
+                                            >
+                                              {(isAr ? val.value_ar : val.value_en) +
+                                                (ok ? "" : ` — ${t("pos.table.soldOut")}`)}
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                    </div>
+                                  </td>
+                                );
+                              }
+                              if (coding) {
+                                // Locked: baked into the scanned variant code.
+                                return (
+                                  <td key={col.attr_id} className="px-3 py-2">
+                                    <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+                                      {coding.type === "color" && coding.hex && (
+                                        <span
+                                          className="h-3 w-3 shrink-0 rounded-full border border-border"
+                                          style={{ backgroundColor: coding.hex }}
+                                        />
+                                      )}
+                                      {isAr ? coding.value_ar : coding.value_en}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={col.attr_id} className="px-3 py-2 text-center text-muted">
+                                  —
+                                </td>
+                              );
+                            })}
+                            <td className="px-3 py-2 text-center">
+                              {editing ? (
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  inputMode="decimal"
+                                  dir="ltr"
+                                  value={priceVal}
+                                  onChange={(e) =>
+                                    setPriceDraft((d) => ({
+                                      ...d,
+                                      [item.stock_id]: e.target.value.replace(/[^0-9.]/g, ""),
+                                    }))
+                                  }
+                                  onBlur={(e) => {
+                                    commitPrice(item, e.target.value);
+                                    setEditPrice(null);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      commitPrice(item, e.target.value);
+                                      setEditPrice(null);
+                                    } else if (e.key === "Escape") {
+                                      setPriceDraft((d) => {
+                                        const { [item.stock_id]: _drop, ...rest } = d;
+                                        return rest;
+                                      });
+                                      setEditPrice(null);
+                                    }
+                                  }}
+                                  className={`${inputSm} mx-auto w-24 text-center`}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onDoubleClick={() => {
+                                    setPriceDraft((d) => ({
+                                      ...d,
+                                      [item.stock_id]: String(item.unit_price),
+                                    }));
+                                    setEditPrice(item.stock_id);
+                                  }}
+                                  title={t("pos.table.editPrice")}
+                                  className={`mx-auto cursor-text rounded-md px-2 py-1 font-medium tabular-nums hover:bg-elevated ${
+                                    item.unit_price < item.price ? "text-amber-300" : "text-text"
+                                  }`}
+                                  dir="ltr"
+                                >
+                                  {num2(item.unit_price)}
+                                </button>
+                              )}
                             </td>
                             <td className="px-3 py-2">
                               <div className="mx-auto flex w-fit items-center gap-1">
                                 <button
                                   type="button"
                                   onClick={() => commitQty(item, item.quantity - 1)}
-                                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text transition hover:border-accent hover:text-accent"
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-accent transition hover:bg-accent/10"
                                 >
                                   <span className="text-base leading-none">−</span>
                                 </button>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  dir="ltr"
-                                  value={qtyVal}
-                                  onChange={(e) =>
-                                    setQtyDraft((d) => ({ ...d, [item.stock_id]: e.target.value }))
-                                  }
-                                  onBlur={(e) => commitQty(item, Math.trunc(Number(e.target.value) || 0))}
-                                  onKeyDown={(e) =>
-                                    e.key === "Enter" && commitQty(item, Math.trunc(Number(e.target.value) || 0))
-                                  }
-                                  className={`${inputSm} w-14 text-center`}
-                                />
+                                {editingQty ? (
+                                  <input
+                                    autoFocus
+                                    type="text"
+                                    inputMode="numeric"
+                                    dir="ltr"
+                                    value={qtyVal}
+                                    onChange={(e) =>
+                                      setQtyDraft((d) => ({
+                                        ...d,
+                                        [item.stock_id]: e.target.value.replace(/[^0-9]/g, ""),
+                                      }))
+                                    }
+                                    onBlur={(e) => {
+                                      commitQty(item, Math.trunc(Number(e.target.value) || 0));
+                                      setEditQty(null);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        commitQty(item, Math.trunc(Number(e.target.value) || 0));
+                                        setEditQty(null);
+                                      } else if (e.key === "Escape") {
+                                        setQtyDraft((d) => {
+                                          const { [item.stock_id]: _drop, ...rest } = d;
+                                          return rest;
+                                        });
+                                        setEditQty(null);
+                                      }
+                                    }}
+                                    className={`${inputSm} w-14 text-center`}
+                                  />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onDoubleClick={() => {
+                                      setQtyDraft((d) => ({
+                                        ...d,
+                                        [item.stock_id]: String(item.quantity),
+                                      }));
+                                      setEditQty(item.stock_id);
+                                    }}
+                                    title={t("pos.table.editQty")}
+                                    className="w-14 cursor-text rounded-md px-2 py-1 text-center font-medium tabular-nums text-text hover:bg-elevated"
+                                    dir="ltr"
+                                  >
+                                    {item.quantity}
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   disabled={atMax}
                                   onClick={() => commitQty(item, item.quantity + 1)}
-                                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text transition hover:border-accent hover:text-accent disabled:opacity-40"
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-accent transition hover:bg-accent/10 disabled:opacity-40"
                                 >
                                   <IconPlus width={14} height={14} />
                                 </button>
@@ -523,14 +815,26 @@ export default function CartWorkspace({ tab, boot, patch }) {
                               {money((item.unit_price || 0) * (item.quantity || 0))}
                             </td>
                             <td className="px-2 py-2">
-                              <button
-                                type="button"
-                                onClick={() => removeItem(item)}
-                                title={t("pos.remove")}
-                                className="flex h-7 w-7 items-center justify-center rounded-lg text-red-400 hover:bg-red-500/10"
-                              >
-                                <IconTrash width={15} height={15} />
-                              </button>
+                              <div className="flex items-center justify-center gap-1">
+                                {item.pending && (
+                                  <button
+                                    type="button"
+                                    onClick={() => confirmVariant(item)}
+                                    title={t("pos.confirmVariant")}
+                                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15 text-accent hover:bg-accent/25"
+                                  >
+                                    <IconCheck width={15} height={15} />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => removeItem(item)}
+                                  title={t("pos.remove")}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-red-400 hover:bg-red-500/10"
+                                >
+                                  <IconTrash width={15} height={15} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -558,7 +862,15 @@ export default function CartWorkspace({ tab, boot, patch }) {
                   dir="ltr"
                   value={tab.customer.phone}
                   onChange={(e) => setCustomer({ phone: e.target.value })}
-                  className={inputSm}
+                  onBlur={(e) => {
+                    const n = normalizePhone(e.target.value);
+                    if (n && n !== e.target.value) setCustomer({ phone: n });
+                  }}
+                  className={`${inputSm} ${
+                    tab.customer.phone && !phoneValid(tab.customer.phone)
+                      ? "border-red-500/70"
+                      : ""
+                  }`}
                   placeholder="+20…"
                 />
                 <p className="mt-1 text-xs text-muted">{t("pos.customer.phoneHint")}</p>
@@ -609,6 +921,39 @@ export default function CartWorkspace({ tab, boot, patch }) {
               </div>
             </div>
 
+            {/* Cash tendered + change (only for cash payments) */}
+            {isCash && (
+              <div className="rounded-xl border border-border bg-elevated/40 p-4">
+                <label className="mb-1 block text-xs font-medium text-muted">
+                  {t("pos.payment.paid")}
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  dir="ltr"
+                  value={tab.paidAmount}
+                  onChange={(e) => patch({ paidAmount: e.target.value.replace(/[^0-9.]/g, "") })}
+                  onBlur={(e) => {
+                    // Auto-adjust: anything below the total snaps up to the total.
+                    const v = Number(e.target.value);
+                    if (!isFinite(v) || v < stats.total) patch({ paidAmount: stats.total.toFixed(2) });
+                  }}
+                  placeholder={num2(stats.total)}
+                  className={`${inputSm} text-center text-base`}
+                />
+                <div className="mt-3 space-y-1 border-t border-border pt-3 text-sm">
+                  <div className="flex items-center justify-between text-muted">
+                    <span>{t("pos.payment.changeRaw")}</span>
+                    <span className="text-lg font-bold text-accent">{money(cash.raw)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted">
+                    <span>{t("pos.payment.changeExact")}</span>
+                    <span>{money(cash.exact)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Summary */}
             <div className="rounded-xl border border-border bg-elevated/40 p-4">
               <div className="flex items-center justify-between text-sm text-muted">
@@ -623,46 +968,139 @@ export default function CartWorkspace({ tab, boot, patch }) {
           </div>
         )}
 
-        {step === 3 && tab.sale && (
-          <div className="mx-auto max-w-lg">
-            <div className="rounded-2xl border border-border bg-elevated/30 p-6">
-              <div className="mb-4 text-center">
-                <span className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
-                  <IconCheck width={26} height={26} />
-                </span>
-                <h3 className="text-lg font-bold text-text">{t("pos.invoice.title")}</h3>
-                <p className="text-xs text-muted">{t("pos.invoice.thanks")}</p>
+        {step === 3 && (
+          <div className="mx-auto max-w-2xl">
+            <div className="overflow-hidden rounded-2xl border border-border bg-gradient-to-b from-elevated/40 to-surface shadow-xl">
+              {/* Brand header */}
+              <div className="flex items-start justify-between gap-4 border-b border-border bg-elevated/40 p-5">
+                <div className="flex items-center gap-3">
+                  {brand.logo && (
+                    <img src={brand.logo} alt="" className="h-10 w-10 rounded-lg object-contain" />
+                  )}
+                  <div>
+                    <p className="text-lg font-extrabold tracking-tight text-text">{brand.name}</p>
+                    {brand.motto && <p className="text-xs text-muted">{brand.motto}</p>}
+                  </div>
+                </div>
+                <div className="text-end">
+                  <p className="text-sm font-bold uppercase tracking-[0.2em] text-accent">
+                    {t("pos.invoice.title")}
+                  </p>
+                  <p className="mt-1 font-mono text-sm text-text">
+                    {inv.invoice_no || t("pos.invoice.draft")}
+                  </p>
+                  <p className="text-xs text-muted" dir="ltr">
+                    {inv.created_at
+                      ? new Date(inv.created_at).toLocaleString(isAr ? "ar-EG" : "en-US")
+                      : "—"}
+                  </p>
+                  {committed && (
+                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      <IconCheck width={12} height={12} /> {t("pos.invoice.paidBadge")}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 border-y border-border py-3 text-sm">
-                <span className="text-muted">{t("pos.invoice.number")}</span>
-                <span className="text-end font-mono text-text">{tab.sale.invoice_no}</span>
-                <span className="text-muted">{t("pos.invoice.date")}</span>
-                <span className="text-end text-text" dir="ltr">
-                  {tab.sale.created_at ? new Date(tab.sale.created_at).toLocaleString(isAr ? "ar-EG" : "en-US") : "—"}
-                </span>
-                <span className="text-muted">{t("pos.invoice.customer")}</span>
-                <span className="text-end text-text">{tab.sale.customer_name || "—"}</span>
-                <span className="text-muted">{t("pos.invoice.payment")}</span>
-                <span className="text-end text-text">{tab.sale.payment_method || "—"}</span>
+              {/* Bill to + payment */}
+              <div className="grid grid-cols-2 gap-4 border-b border-border p-5 text-sm">
+                <div>
+                  <p className="mb-1 text-xs uppercase tracking-widest text-muted">
+                    {t("pos.invoice.billTo")}
+                  </p>
+                  <p className="font-semibold text-text">{inv.customer_name || "—"}</p>
+                  {inv.customer_phone && (
+                    <p className="text-muted" dir="ltr">{inv.customer_phone}</p>
+                  )}
+                </div>
+                <div className="text-end">
+                  <p className="mb-1 text-xs uppercase tracking-widest text-muted">
+                    {t("pos.invoice.payment")}
+                  </p>
+                  <p className="font-semibold text-text">{inv.payment_method || "—"}</p>
+                </div>
               </div>
 
-              <table className="my-3 w-full text-sm">
-                <tbody>
-                  {tab.sale.items.map((it, idx) => (
-                    <tr key={idx} className="border-b border-border/50 last:border-0">
-                      <td className="py-1.5 text-text">
-                        {it.name} <span className="text-muted">× {it.quantity}</span>
-                      </td>
-                      <td className="py-1.5 text-end text-text">{money(it.line_total)}</td>
+              {/* Items */}
+              <div className="p-5">
+                <table className="ctrl-table w-full text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase tracking-wide text-muted">
+                      <th className="px-2 py-2 text-start font-medium">{t("pos.invoice.item")}</th>
+                      <th className="px-2 py-2 text-center font-medium">{t("pos.table.qty")}</th>
+                      <th className="px-2 py-2 text-center font-medium">{t("pos.table.price")}</th>
+                      <th className="px-2 py-2 text-end font-medium">{t("pos.table.total")}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {inv.items.map((it, idx) => (
+                      <tr key={idx} className="border-b border-border/50 last:border-0">
+                        <td className="px-2 py-2 text-start">
+                          <p className="font-medium text-text">{it.name}</p>
+                          {(it.attributes || []).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {it.attributes.map((a, i2) => (
+                                <span
+                                  key={i2}
+                                  className="inline-flex items-center gap-1 rounded-full bg-elevated px-2 py-0.5 text-[11px] text-muted"
+                                >
+                                  {a.hex && (
+                                    <span
+                                      className="h-2.5 w-2.5 rounded-full border border-white/20"
+                                      style={{ backgroundColor: a.hex }}
+                                    />
+                                  )}
+                                  {(isAr ? a.value_ar : a.value_en) || a.value_en}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-center text-text">{it.quantity}</td>
+                        <td className="px-2 py-2 text-center text-text" dir="ltr">{num2(it.unit_price)}</td>
+                        <td className="px-2 py-2 text-end font-medium text-text">{money(it.line_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-              <div className="flex items-center justify-between border-t border-border pt-3 text-base font-bold text-text">
-                <span>{t("pos.stats.total")}</span>
-                <span>{money(tab.sale.total)}</span>
+              {/* Totals — full-width rows: label on the start, amount on the end. */}
+              <div className="border-t border-border p-5">
+                <div className="w-full space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between text-muted">
+                    <span>{t("pos.invoice.subtotal")}</span>
+                    <span className="text-text">{money(inv.subtotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted">
+                    <span>{t("pos.stats.discount")}</span>
+                    <span className="text-text">−{money(inv.discount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-2 text-base font-bold text-text">
+                    <span>{t("pos.stats.total")}</span>
+                    <span>{money(inv.total)}</span>
+                  </div>
+                  {isCash && (
+                    <div className="mt-2 space-y-1 rounded-lg bg-elevated/50 p-3">
+                      <div className="flex items-center justify-between text-muted">
+                        <span>{t("pos.payment.paid")}</span>
+                        <span className="text-text">{money(inv.paid)}</span>
+                      </div>
+                      <div className="flex items-center justify-between font-semibold text-accent">
+                        <span>{t("pos.payment.changeRaw")}</span>
+                        <span>{money(inv.changeRaw)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted">
+                        <span>{t("pos.payment.changeExact")}</span>
+                        <span>{money(inv.changeExact)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-border bg-elevated/30 p-4 text-center text-xs text-muted">
+                {t("pos.invoice.thanks")}
               </div>
             </div>
           </div>
@@ -699,8 +1137,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
             </button>
             <button
               type="button"
-              onClick={doCheckout}
-              disabled={busy}
+              onClick={goToInvoice}
               className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95 disabled:opacity-50"
             >
               {t("pos.next")}
@@ -708,15 +1145,50 @@ export default function CartWorkspace({ tab, boot, patch }) {
             </button>
           </>
         )}
-        {step === 3 && (
+        {step === 3 && !committed && (
           <>
             <button
               type="button"
-              onClick={() => {}}
+              onClick={() => patch({ step: 2 })}
               className="ctrl-btn border border-border px-4 py-2 text-sm text-text hover:bg-elevated"
             >
-              {t("pos.invoice.print")}
+              {isAr ? <IconChevronRight width={16} height={16} /> : <IconChevronLeft width={16} height={16} />}
+              {t("pos.back")}
             </button>
+            <div className="flex items-center gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted">
+                <input
+                  type="checkbox"
+                  checked={tab.skipInvoice}
+                  onChange={(e) => patch({ skipInvoice: e.target.checked })}
+                  className="ctrl-check"
+                />
+                {t("pos.invoice.skip")}
+              </label>
+              <button
+                type="button"
+                onClick={doCheckout}
+                disabled={busy}
+                className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95 disabled:opacity-50"
+              >
+                <IconCheck width={16} height={16} /> {t("pos.invoice.checkout")}
+              </button>
+            </div>
+          </>
+        )}
+        {step === 3 && committed && (
+          <>
+            {tab.skipInvoice ? (
+              <span className="text-sm text-muted">{t("pos.invoice.skipped")}</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="ctrl-btn border border-border px-4 py-2 text-sm text-text hover:bg-elevated"
+              >
+                {t("pos.invoice.print")}
+              </button>
+            )}
             <button
               type="button"
               onClick={newSale}

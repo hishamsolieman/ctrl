@@ -252,3 +252,11 @@ export const IconWallet = (p) => (
     <circle cx="16.5" cy="13" r="1.2" />
   </svg>
 );
+
+export const IconDiscount = (p) => (
+  <svg {...base} {...p}>
+    <line x1="6" y1="18" x2="18" y2="6" />
+    <circle cx="7.5" cy="7.5" r="1.6" />
+    <circle cx="16.5" cy="16.5" r="1.6" />
+  </svg>
+);

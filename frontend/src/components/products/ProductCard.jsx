@@ -17,7 +17,7 @@ function formatPrice(v) {
   });
 }
 
-export default function ProductCard({ product, currency, selected, onToggleSelect, onView, onEdit, onCopy, onDelete }) {
+export default function ProductCard({ product, currency, selected, onToggleSelect, onView, onEdit, onCopy, onDelete, onAddToCart }) {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const images = product.images || [];
@@ -95,6 +95,7 @@ export default function ProductCard({ product, currency, selected, onToggleSelec
         <button
           type="button"
           title={t("products.addToCart")}
+          onClick={() => onAddToCart?.(product)}
           className="absolute bottom-3 end-3 flex h-9 w-9 items-center justify-center rounded-full bg-accent text-black shadow-accent transition hover:scale-105"
         >
           <IconCart width={17} height={17} />
