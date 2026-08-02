@@ -11,6 +11,7 @@ import Products from "@/pages/Products";
 import ProductCategories from "@/pages/ProductCategories";
 import ProductAttributes from "@/pages/ProductAttributes";
 import Suppliers from "@/pages/Suppliers";
+import Customers from "@/pages/Customers";
 import Preloader from "@/components/Preloader";
 
 // Redirect authenticated users away from /login.
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/products/categories" element={<ProductCategories />} />
             <Route path="/products/attributes" element={<ProductAttributes />} />
             <Route path="/suppliers" element={<Suppliers />} />
+            <Route path="/customers" element={<Customers />} />
           </Route>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -12,6 +12,7 @@ from app.api.routes import (
     auth,
     catalog,
     categories,
+    customers,
     images,
     meta,
     pos,
@@ -43,6 +44,7 @@ app.include_router(meta.router)
 app.include_router(auth.router)
 app.include_router(catalog.router)
 app.include_router(suppliers.router)
+app.include_router(customers.router)
 app.include_router(categories.router)
 app.include_router(images.router)
 app.include_router(attributes.router)

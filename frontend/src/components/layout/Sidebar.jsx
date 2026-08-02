@@ -10,6 +10,7 @@ import {
   IconSliders,
   IconTruck,
   IconCart,
+  IconUser,
   IconChevronDown,
 } from "@/components/icons";
 
@@ -26,6 +27,7 @@ const NAV = [
     ],
   },
   { to: "/suppliers", key: "nav.suppliers", Icon: IconTruck },
+  { to: "/customers", key: "nav.customers", Icon: IconUser },
 ];
 
 const linkBase =
