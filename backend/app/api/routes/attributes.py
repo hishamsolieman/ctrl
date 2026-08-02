@@ -16,6 +16,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -417,6 +418,68 @@ def update_attribute(
                entity_id=attr.id, request=request)
     used_attr_ids, _ = _usage(db)
     return _serialize(attr, used_attr_ids)
+
+
+class ValueIn(BaseModel):
+    """A single value to append to an existing attribute. For `number` types the
+    number is carried in `value_en`; for `color` types `hex` is the palette."""
+    value_en: str = Field(default="", max_length=255)
+    value_ar: str = Field(default="", max_length=255)
+    hex: str | None = None
+
+
+@router.post("/{attribute_id}/values", status_code=status.HTTP_201_CREATED)
+def add_attribute_value(
+    attribute_id: int,
+    payload: ValueIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+):
+    """Append a value to an existing attribute (used from the product modal)."""
+    attr = db.get(Attribute, attribute_id)
+    if not attr or attr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Attribute not found")
+
+    if attr.type == "number":
+        num = (payload.value_en or "").strip()
+        if not num:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.attrs.modal.valueRequired")
+        value_en = value_ar = num
+        extra = None
+    elif attr.type == "color":
+        if not payload.value_en.strip() or not payload.value_ar.strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.attrs.modal.valueRequired")
+        value_en, value_ar = payload.value_en.strip(), payload.value_ar.strip()
+        extra = {"hex": (payload.hex or "#8eff19")}
+    else:  # text
+        if not payload.value_en.strip() or not payload.value_ar.strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.attrs.modal.valueRequired")
+        value_en, value_ar = payload.value_en.strip(), payload.value_ar.strip()
+        extra = None
+
+    # Values must be unique within the attribute (EN, AR, and hex for colours).
+    en_l, ar_l = value_en.lower(), value_ar.lower()
+    hex_l = (extra or {}).get("hex", "").lower() if extra else ""
+    for v in attr.values:
+        if v.is_deleted:
+            continue
+        if (v.value_en or "").strip().lower() == en_l:
+            raise HTTPException(status.HTTP_409_CONFLICT, "products.attrs.errors.dupValueEn")
+        if (v.value_ar or "").strip().lower() == ar_l:
+            raise HTTPException(status.HTTP_409_CONFLICT, "products.attrs.errors.dupValueAr")
+        if attr.type == "color" and ((v.extra or {}).get("hex") or "").strip().lower() == hex_l:
+            raise HTTPException(status.HTTP_409_CONFLICT, "products.attrs.errors.dupColorHex")
+
+    nv = AttributeValue(value_en=value_en, value_ar=value_ar, extra=extra, sort_order=len(attr.values))
+    attr.values.append(nv)
+    db.commit()
+    db.refresh(attr)
+    db.refresh(nv)
+    log_action(db, action="attribute.value.add", user_id=user.id, entity="attribute",
+               entity_id=attr.id, request=request)
+    used_attr_ids, _ = _usage(db)
+    return {"attribute": _serialize(attr, used_attr_ids), "value_id": nv.id}
 
 
 @router.delete("/{attribute_id}")

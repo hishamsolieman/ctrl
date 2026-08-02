@@ -202,6 +202,21 @@ export async function deleteSupplier(id) {
   return data;
 }
 
+export async function listSupplierInvoices(id) {
+  const { data } = await api.get(`/suppliers/${id}/invoices`);
+  return data;
+}
+
+export async function createSupplierInvoice(id, payload) {
+  const { data } = await api.post(`/suppliers/${id}/invoices`, payload);
+  return data;
+}
+
+export async function deleteSupplierInvoice(id, invoiceId) {
+  const { data } = await api.delete(`/suppliers/${id}/invoices/${invoiceId}`);
+  return data;
+}
+
 export async function getCurrency() {
   const { data } = await api.get("/currency");
   return data.currency;
@@ -220,6 +235,12 @@ export async function createAttribute(payload) {
 
 export async function updateAttribute(id, payload) {
   const { data } = await api.put(`/attributes/${id}`, payload);
+  return data;
+}
+
+// Append a single value to an existing attribute. Returns { attribute, value_id }.
+export async function addAttributeValue(id, payload) {
+  const { data } = await api.post(`/attributes/${id}/values`, payload);
   return data;
 }
 

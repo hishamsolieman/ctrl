@@ -82,6 +82,19 @@ def patch_schema() -> None:
                 "ALTER TABLE `suppliers` "
                 "ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
             )
+        # supplier_invoices.invoice_date — mandatory (API-level) invoice date.
+        has_inv_date = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'supplier_invoices' "
+                "AND COLUMN_NAME = 'invoice_date'"
+            ),
+            {"db": settings.DB_NAME},
+        ).scalar()
+        if not has_inv_date:
+            conn.exec_driver_sql(
+                "ALTER TABLE `supplier_invoices` ADD COLUMN `invoice_date` DATE NULL AFTER `amount`"
+            )
         # product_variants.quantity — per-variant on-hand stock.
         has_qty = conn.execute(
             text(

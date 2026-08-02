@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Modal from "@/components/Modal";
 import CategoryModal from "@/components/categories/CategoryModal";
+import SupplierModal from "@/components/suppliers/SupplierModal";
+import AttrValueSelect from "@/components/products/AttrValueSelect";
+import AttributeValueModal from "@/components/products/AttributeValueModal";
 import { useToast } from "@/context/ToastContext";
 import {
   createProduct,
@@ -138,10 +141,16 @@ export default function ProductModal({
   const [tagDraft, setTagDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadingKey, setUploadingKey] = useState(null);
-  // Local category list so a category created via the nested modal appears
-  // instantly without waiting on a parent refetch.
+  // Local reference lists so an item created via a nested modal (category,
+  // supplier, attribute) appears instantly without waiting on a parent refetch.
   const [cats, setCats] = useState(categories || []);
+  const [sups, setSups] = useState(suppliers || []);
+  const [attrs, setAttrs] = useState(attributes || []);
   const [catModalOpen, setCatModalOpen] = useState(false);
+  const [supModalOpen, setSupModalOpen] = useState(false);
+  // Context for the "add value to an existing attribute" modal:
+  // { attr, scope: "global" } or { attr, scope: "variant", key }.
+  const [valueModal, setValueModal] = useState(null);
   const fileRefs = useRef({});
 
   useEffect(() => {
@@ -184,6 +193,12 @@ export default function ProductModal({
   useEffect(() => {
     setCats(categories || []);
   }, [categories]);
+  useEffect(() => {
+    setSups(suppliers || []);
+  }, [suppliers]);
+  useEffect(() => {
+    setAttrs(attributes || []);
+  }, [attributes]);
 
   const title = useMemo(() => {
     if (mode === "edit") return t("products.modal.editTitle");
@@ -193,8 +208,8 @@ export default function ProductModal({
 
   // Coding attributes differentiate variants; non-coding ("global") attributes
   // apply to the whole product (same across all variants).
-  const codingAttrs = (attributes || []).filter((a) => a.coding);
-  const globalAttrs = (attributes || []).filter((a) => !a.coding);
+  const codingAttrs = attrs.filter((a) => a.coding);
+  const globalAttrs = attrs.filter((a) => !a.coding);
   const hasVariants = codingAttrs.length > 0;
   // Widen the modal as the variant table grows more columns, instead of
   // forcing a horizontal scrollbar.
@@ -247,6 +262,39 @@ export default function ProductModal({
     setForm((f) =>
       f.category_id ? f : { ...f, category_id: cats.length ? String(cats[0].id) : "" }
     );
+  }
+
+  // ---- Supplier (nested "add supplier" modal) ----
+  function onSupplierChange(value) {
+    if (value === "__add__") {
+      setSupModalOpen(true); // the <select> keeps its previous value
+      return;
+    }
+    set("supplier_id", value);
+  }
+  function onSupplierSaved(created) {
+    setSupModalOpen(false);
+    if (created?.id != null) {
+      setSups((prev) => (prev.some((s) => s.id === created.id) ? prev : [...prev, created]));
+      set("supplier_id", String(created.id));
+    }
+  }
+  // Supplier is optional, so a dismissed/failed modal simply keeps the current
+  // selection (which may be "none").
+  const onSupplierModalClose = () => setSupModalOpen(false);
+
+  // ---- Attribute values (nested "add value" modal) ----
+  // Users can't create attributes here, only add values to existing ones.
+  // The updated attribute (with the new value) replaces the local copy and the
+  // new value is auto-selected in the field it was added from.
+  function onValueSaved(updatedAttr, newValueId) {
+    const ctx = valueModal;
+    setValueModal(null);
+    if (!updatedAttr?.id) return;
+    setAttrs((prev) => prev.map((a) => (a.id === updatedAttr.id ? updatedAttr : a)));
+    if (newValueId == null || !ctx) return;
+    if (ctx.scope === "variant") setVariantAttr(ctx.key, updatedAttr.id, String(newValueId));
+    else setGlobalAttr(updatedAttr.id, String(newValueId));
   }
 
   // ---- Tags ----
@@ -546,11 +594,12 @@ export default function ProductModal({
         <div>
           <label className={labelCls}>{t("products.modal.supplier")}</label>
           <select className={`${inputCls} ctrl-select`} value={form.supplier_id}
-            onChange={(e) => set("supplier_id", e.target.value)}>
+            onChange={(e) => onSupplierChange(e.target.value)}>
             <option value="">{t("products.modal.selectSupplier")}</option>
-            {suppliers.map((s) => (
+            {sups.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
+            <option value="__add__">＋ {t("products.modal.addSupplier")}</option>
           </select>
         </div>
         <div>
@@ -605,41 +654,33 @@ export default function ProductModal({
         </div>
       </div>
 
-      {/* Global (non-coding) attributes — one selection shared by all variants */}
-      {globalAttrs.length > 0 && (
-        <div className="mt-5">
-          <label className={labelCls + " mb-2 block"}>{t("products.modal.productAttributes")}</label>
+      {/* Product attributes — global (non-coding) selections. Users pick values
+          (searchable) and may add new values to an existing attribute. */}
+      <div className="mt-5">
+        <label className={labelCls + " mb-2 block"}>{t("products.modal.productAttributes")}</label>
+        {attrs.length === 0 && (
+          <p className="text-xs text-muted">{t("products.modal.noAttributes")}</p>
+        )}
+        {globalAttrs.length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {globalAttrs.map((attr) => {
-              const selId = form.attributes[String(attr.id)];
-              const selVal = attr.values.find((x) => x.id === Number(selId));
-              return (
-                <div key={attr.id}>
-                  <label className={labelCls}>
-                    {isAr ? attr.name_ar : attr.name_en}
-                    {attr.is_required && <span className="text-accent"> *</span>}
-                  </label>
-                  <div className="relative">
-                    {attr.type === "color" && selVal?.extra?.hex && (
-                      <span className="pointer-events-none absolute inset-y-0 start-2.5 flex items-center">
-                        <span className="h-4 w-4 rounded-full border border-white/20"
-                          style={{ backgroundColor: selVal.extra.hex }} />
-                      </span>
-                    )}
-                    <select className={`${inputCls} ctrl-select ${attr.type === "color" && selVal?.extra?.hex ? "ps-9" : ""}`}
-                      value={selId || ""} onChange={(e) => setGlobalAttr(attr.id, e.target.value)}>
-                      <option value="">{t("products.modal.selectValue")}</option>
-                      {attr.values.map((val) => (
-                        <option key={val.id} value={val.id}>{isAr ? val.value_ar : val.value_en}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              );
-            })}
+            {globalAttrs.map((attr) => (
+              <div key={attr.id}>
+                <label className={labelCls}>
+                  {isAr ? attr.name_ar : attr.name_en}
+                  {attr.is_required && <span className="text-accent"> *</span>}
+                </label>
+                <AttrValueSelect
+                  attr={attr}
+                  className={inputCls}
+                  value={form.attributes[String(attr.id)] || ""}
+                  onChange={(val) => setGlobalAttr(attr.id, val)}
+                  onAddValue={() => setValueModal({ attr, scope: "global" })}
+                />
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Variants — shown only when coding attributes exist */}
       {hasVariants ? (
@@ -681,32 +722,19 @@ export default function ProductModal({
                       <CodeField className={inputCls} width="w-32" value={v.code}
                         onChange={(val) => updateVariant(v.key, { code: val })} />
                     </td>
-                    {codingAttrs.map((attr) => {
-                      const selId = v.attributes[String(attr.id)];
-                      const selVal = attr.values.find((x) => x.id === Number(selId));
-                      return (
-                        <td key={attr.id} className="px-3 py-2">
-                          <div className="relative min-w-[8.5rem]">
-                            {attr.type === "color" && selVal?.extra?.hex && (
-                              <span className="pointer-events-none absolute inset-y-0 start-2.5 flex items-center">
-                                <span className="h-4 w-4 rounded-full border border-white/20"
-                                  style={{ backgroundColor: selVal.extra.hex }} />
-                              </span>
-                            )}
-                            <select className={`${inputCls} ctrl-select ${attr.type === "color" && selVal?.extra?.hex ? "ps-9" : ""}`}
-                              value={selId || ""}
-                              onChange={(e) => setVariantAttr(v.key, attr.id, e.target.value)}>
-                              <option value="">{t("products.modal.selectValue")}</option>
-                              {attr.values.map((val) => (
-                                <option key={val.id} value={val.id}>
-                                  {isAr ? val.value_ar : val.value_en}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </td>
-                      );
-                    })}
+                    {codingAttrs.map((attr) => (
+                      <td key={attr.id} className="px-3 py-2">
+                        <div className="min-w-[8.5rem]">
+                          <AttrValueSelect
+                            attr={attr}
+                            className={inputCls}
+                            value={v.attributes[String(attr.id)] || ""}
+                            onChange={(val) => setVariantAttr(v.key, attr.id, val)}
+                            onAddValue={() => setValueModal({ attr, scope: "variant", key: v.key })}
+                          />
+                        </div>
+                      </td>
+                    ))}
                     <td className="px-3 py-2">
                       <input type="number" min="0" step="1"
                         className={inputCls + " w-20"} value={v.quantity}
@@ -759,6 +787,23 @@ export default function ProductModal({
       initial={null}
       onClose={onCategoryModalClose}
       onSaved={onCategorySaved}
+    />
+
+    {/* Nested "Add supplier" modal. */}
+    <SupplierModal
+      open={supModalOpen}
+      mode="add"
+      initial={null}
+      onClose={onSupplierModalClose}
+      onSaved={onSupplierSaved}
+    />
+
+    {/* Nested "Add value to attribute" modal. */}
+    <AttributeValueModal
+      open={!!valueModal}
+      attr={valueModal?.attr || null}
+      onClose={() => setValueModal(null)}
+      onSaved={onValueSaved}
     />
     </>
   );

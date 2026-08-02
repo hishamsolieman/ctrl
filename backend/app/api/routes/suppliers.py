@@ -1,7 +1,7 @@
 """Suppliers: CRUD, delete-constraint, and headline stats for the page cards."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from app.api.deps import get_current_user, require_role
 from app.core.database import get_db
 from app.models.product import Product
 from app.models.supplier import Supplier
+from app.models.supplier_invoice import SupplierInvoice
 from app.models.user import User
 from app.services.logging import log_action
 from app.services.settings import get_currency
@@ -27,6 +28,14 @@ class SupplierIn(BaseModel):
     phone: str | None = None
     email: str | None = None
     address: str = Field(min_length=1)
+
+
+class InvoiceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    quantity: int = Field(ge=0)
+    amount: float = Field(ge=0)
+    invoice_date: date
+    image_url: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -272,3 +281,85 @@ def delete_supplier(
     log_action(db, action="supplier.delete", user_id=user.id, entity="supplier",
                entity_id=supplier_id, request=request)
     return {"ok": True, "id": supplier_id}
+
+
+# --------------------------------------------------------------------------- #
+# Invoices
+# --------------------------------------------------------------------------- #
+def _serialize_invoice(inv: SupplierInvoice) -> dict:
+    return {
+        "id": inv.id,
+        "supplier_id": inv.supplier_id,
+        "name": inv.name,
+        "quantity": inv.quantity,
+        "amount": float(inv.amount or 0),
+        "invoice_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+        "image_url": inv.image_url,
+        "created_at": inv.created_at.isoformat() if inv.created_at else None,
+    }
+
+
+def _get_supplier_or_404(db: Session, supplier_id: int) -> Supplier:
+    sup = db.get(Supplier, supplier_id)
+    if not sup or not sup.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Supplier not found")
+    return sup
+
+
+@router.get("/{supplier_id}/invoices")
+def list_invoices(
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    _get_supplier_or_404(db, supplier_id)
+    rows = (
+        db.query(SupplierInvoice)
+        .filter(SupplierInvoice.supplier_id == supplier_id)
+        .order_by(SupplierInvoice.id.desc())
+        .all()
+    )
+    return [_serialize_invoice(i) for i in rows]
+
+
+@router.post("/{supplier_id}/invoices", status_code=status.HTTP_201_CREATED)
+def create_invoice(
+    supplier_id: int,
+    payload: InvoiceIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+):
+    _get_supplier_or_404(db, supplier_id)
+    inv = SupplierInvoice(
+        supplier_id=supplier_id,
+        name=payload.name.strip(),
+        quantity=payload.quantity,
+        amount=round(payload.amount, 2),
+        invoice_date=payload.invoice_date,
+        image_url=(payload.image_url or "").strip() or None,
+    )
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+    log_action(db, action="supplier.invoice.create", user_id=user.id, entity="supplier_invoice",
+               entity_id=inv.id, request=request)
+    return _serialize_invoice(inv)
+
+
+@router.delete("/{supplier_id}/invoices/{invoice_id}")
+def delete_invoice(
+    supplier_id: int,
+    invoice_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+):
+    inv = db.get(SupplierInvoice, invoice_id)
+    if not inv or inv.supplier_id != supplier_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    db.delete(inv)
+    db.commit()
+    log_action(db, action="supplier.invoice.delete", user_id=user.id, entity="supplier_invoice",
+               entity_id=invoice_id, request=request)
+    return {"ok": True, "id": invoice_id}

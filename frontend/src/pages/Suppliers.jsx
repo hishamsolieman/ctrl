@@ -7,6 +7,7 @@ import {
   deleteSupplier,
 } from "@/lib/products";
 import SupplierModal from "@/components/suppliers/SupplierModal";
+import SupplierViewModal from "@/components/suppliers/SupplierViewModal";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   IconTruck,
@@ -15,6 +16,7 @@ import {
   IconStar,
   IconSearch,
   IconPlus,
+  IconEye,
   IconEdit,
   IconCopy,
   IconTrash,
@@ -103,6 +105,7 @@ export default function Suppliers() {
   const [page, setPage] = useState(1);
 
   const [modal, setModal] = useState({ open: false, mode: "add", supplier: null });
+  const [viewing, setViewing] = useState(null);
   const [toDelete, setToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -286,6 +289,9 @@ export default function Suppliers() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
+                        <button title={t("suppliers.view")} className={iconBtn} onClick={() => setViewing(s)}>
+                          <IconEye width={15} height={15} />
+                        </button>
                         <button title={t("suppliers.edit")} className={iconBtn} onClick={() => openEdit(s)}>
                           <IconEdit width={15} height={15} />
                         </button>
@@ -329,8 +335,15 @@ export default function Suppliers() {
         open={modal.open}
         mode={modal.mode}
         initial={modal.supplier}
+        currency={stats?.currency}
         onClose={() => setModal((m) => ({ ...m, open: false }))}
         onSaved={load}
+      />
+      <SupplierViewModal
+        open={!!viewing}
+        supplier={viewing}
+        currency={stats?.currency}
+        onClose={() => setViewing(null)}
       />
       <ConfirmDialog
         open={!!toDelete}

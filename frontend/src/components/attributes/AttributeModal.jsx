@@ -110,14 +110,15 @@ export default function AttributeModal({ open, mode, initial, onClose, onSaved }
     };
     setSaving(true);
     try {
+      let saved;
       if (mode === "edit") {
-        await updateAttribute(initial.id, payload);
+        saved = await updateAttribute(initial.id, payload);
         toast.success(t("products.attrs.modal.updated"));
       } else {
-        await createAttribute(payload);
+        saved = await createAttribute(payload);
         toast.success(t("products.attrs.modal.created"));
       }
-      onSaved?.();
+      onSaved?.(saved);
       onClose?.();
     } catch (err) {
       const d = err?.response?.data?.detail;

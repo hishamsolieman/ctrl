@@ -2,12 +2,16 @@ import { StrictMode, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { loadDbTranslations } from "@/i18n";
 import { applyTheme } from "@/config/theme";
+import { initAutoTitles } from "@/lib/autoTitle";
 import Preloader from "@/components/Preloader";
 import App from "@/App";
 import "./index.css";
 
 // Apply theme colors from the root .env before first paint.
 applyTheme();
+
+// Show full text on hover for any input/select whose text is clipped.
+initAutoTitles();
 
 // A short branded preloader on first boot, then the app.
 function Root() {

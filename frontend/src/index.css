@@ -103,6 +103,15 @@ html[dir="rtl"] body {
   }
 }
 
+/* Single-line inputs and selects clip overly-long text/placeholders with an
+   ellipsis instead of hard-cutting them. The full value is surfaced on hover
+   via a title attribute set automatically (see lib/autoTitle.js). Textareas are
+   excluded because they wrap. Works for both LTR and RTL content. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+select {
+  text-overflow: ellipsis;
+}
+
 /* Mirror the select chevron to the inline-start edge in RTL. */
 html[dir="rtl"] .ctrl-select {
   background-position: left 0.75rem center;

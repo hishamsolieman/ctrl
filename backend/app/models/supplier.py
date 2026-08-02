@@ -21,3 +21,8 @@ class Supplier(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     products: Mapped[list["Product"]] = relationship(back_populates="supplier")  # noqa: F821
+    invoices: Mapped[list["SupplierInvoice"]] = relationship(  # noqa: F821
+        back_populates="supplier",
+        cascade="all, delete-orphan",
+        order_by="SupplierInvoice.id.desc()",
+    )

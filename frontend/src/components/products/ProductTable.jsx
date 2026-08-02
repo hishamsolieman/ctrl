@@ -27,9 +27,11 @@ export default function ProductTable({
     "flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text transition hover:border-accent hover:text-accent";
 
   return (
-    <table className="w-full border-collapse text-sm">
+    // `h-full` lets the rows stretch to fill the container so a full page of 8
+    // rows spans the available height (no leftover empty space at the bottom).
+    <table className="h-full w-full border-collapse text-sm">
       <thead className="sticky top-0 z-10 bg-surface">
-        <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
+        <tr className="h-px border-b border-border text-xs uppercase tracking-wide text-muted">
           <th className="w-10 px-3 py-3">
             <input type="checkbox" className="ctrl-check" checked={pageAllSelected} onChange={onToggleSelectAll} />
           </th>

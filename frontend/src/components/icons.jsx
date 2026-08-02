@@ -218,6 +218,12 @@ export const IconMail = (p) => (
   </svg>
 );
 
+export const IconCheck = (p) => (
+  <svg {...base} {...p}>
+    <path d="M20 6 9 17l-5-5" />
+  </svg>
+);
+
 export const IconMapPin = (p) => (
   <svg {...base} {...p}>
     <path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z" />
