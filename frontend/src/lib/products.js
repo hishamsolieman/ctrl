@@ -182,8 +182,23 @@ export async function listSuppliers() {
   return data;
 }
 
+export async function getSupplierStats() {
+  const { data } = await api.get("/suppliers/stats");
+  return data;
+}
+
 export async function createSupplier(payload) {
   const { data } = await api.post("/suppliers", payload);
+  return data;
+}
+
+export async function updateSupplier(id, payload) {
+  const { data } = await api.put(`/suppliers/${id}`, payload);
+  return data;
+}
+
+export async function deleteSupplier(id) {
+  const { data } = await api.delete(`/suppliers/${id}`);
   return data;
 }
 

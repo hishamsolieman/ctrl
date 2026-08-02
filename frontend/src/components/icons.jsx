@@ -189,3 +189,60 @@ export const IconTag = (p) => (
     <path d="M7 7h.01" />
   </svg>
 );
+
+export const IconTruck = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 4h11v11H3z" />
+    <path d="M14 8h4l3 3v4h-7z" />
+    <circle cx="7.5" cy="18" r="1.6" />
+    <circle cx="17.5" cy="18" r="1.6" />
+  </svg>
+);
+
+export const IconStar = (p) => (
+  <svg {...base} {...p}>
+    <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 18.8 6.2 21l1.1-6.5L2.6 9.8l6.5-.9L12 3z" />
+  </svg>
+);
+
+export const IconPhone = (p) => (
+  <svg {...base} {...p}>
+    <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" />
+  </svg>
+);
+
+export const IconMail = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3 7 9 6 9-6" />
+  </svg>
+);
+
+export const IconMapPin = (p) => (
+  <svg {...base} {...p}>
+    <path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z" />
+    <circle cx="12" cy="10" r="3" />
+  </svg>
+);
+
+export const IconTrendUp = (p) => (
+  <svg {...base} {...p}>
+    <path d="m3 17 6-6 4 4 8-8" />
+    <path d="M17 7h4v4" />
+  </svg>
+);
+
+export const IconTrendDown = (p) => (
+  <svg {...base} {...p}>
+    <path d="m3 7 6 6 4-4 8 8" />
+    <path d="M17 17h4v-4" />
+  </svg>
+);
+
+export const IconWallet = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2" />
+    <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z" />
+    <circle cx="16.5" cy="13" r="1.2" />
+  </svg>
+);

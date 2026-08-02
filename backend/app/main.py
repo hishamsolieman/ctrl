@@ -7,7 +7,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import attributes, auth, catalog, categories, images, meta, products
+from app.api.routes import (
+    attributes,
+    auth,
+    catalog,
+    categories,
+    images,
+    meta,
+    products,
+    suppliers,
+)
 from app.core.config import settings
 
 app = FastAPI(
@@ -32,6 +41,7 @@ app.add_middleware(
 app.include_router(meta.router)
 app.include_router(auth.router)
 app.include_router(catalog.router)
+app.include_router(suppliers.router)
 app.include_router(categories.router)
 app.include_router(images.router)
 app.include_router(attributes.router)

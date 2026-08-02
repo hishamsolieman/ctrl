@@ -1,47 +1,17 @@
-"""Catalog support endpoints: categories, suppliers, currency."""
+"""Catalog support endpoints: currency. (Suppliers live in suppliers.py.)"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_role
+from app.api.deps import require_role
 from app.core.database import get_db
-from app.models.supplier import Supplier
 from app.models.user import User
 from app.services.logging import log_action
 from app.services.settings import CURRENCY_KEY, get_currency, set_setting
 
 router = APIRouter(tags=["catalog"])
-
-
-# ------------------------------ Suppliers --------------------------------- #
-class SupplierIn(BaseModel):
-    name: str = Field(min_length=1, max_length=180)
-    phone: str | None = None
-    email: str | None = None
-
-
-@router.get("/suppliers")
-def list_suppliers(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
-    rows = db.query(Supplier).filter(Supplier.is_active.is_(True)).order_by(Supplier.name).all()
-    return [{"id": s.id, "name": s.name, "phone": s.phone, "email": s.email} for s in rows]
-
-
-@router.post("/suppliers", status_code=status.HTTP_201_CREATED)
-def create_supplier(
-    payload: SupplierIn,
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
-):
-    sup = Supplier(name=payload.name, phone=payload.phone, email=payload.email, is_active=True)
-    db.add(sup)
-    db.commit()
-    db.refresh(sup)
-    log_action(db, action="supplier.create", user_id=user.id, entity="supplier",
-               entity_id=sup.id, request=request)
-    return {"id": sup.id, "name": sup.name, "phone": sup.phone, "email": sup.email}
 
 
 # ------------------------------- Currency --------------------------------- #

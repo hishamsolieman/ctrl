@@ -55,6 +55,33 @@ def patch_schema() -> None:
     provisioned databases are handled here (guarded via information_schema).
     """
     with engine.begin() as conn:
+        # suppliers.address — mandatory supplier address.
+        has_addr = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'suppliers' "
+                "AND COLUMN_NAME = 'address'"
+            ),
+            {"db": settings.DB_NAME},
+        ).scalar()
+        if not has_addr:
+            conn.exec_driver_sql(
+                "ALTER TABLE `suppliers` ADD COLUMN `address` TEXT NULL AFTER `email`"
+            )
+        # suppliers.created_at — used for month-over-month "new suppliers" trend.
+        has_sup_created = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'suppliers' "
+                "AND COLUMN_NAME = 'created_at'"
+            ),
+            {"db": settings.DB_NAME},
+        ).scalar()
+        if not has_sup_created:
+            conn.exec_driver_sql(
+                "ALTER TABLE `suppliers` "
+                "ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            )
         # product_variants.quantity — per-variant on-hand stock.
         has_qty = conn.execute(
             text(
