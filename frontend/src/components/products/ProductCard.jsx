@@ -102,7 +102,7 @@ export default function ProductCard({ product, currency, selected, onToggleSelec
 
         {/* Actions (hover) */}
         <div className="absolute end-3 top-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
-          <button type="button" title={t("products.view")} className={iconBtn}
+          <button type="button" title={t("products.viewAction")} className={iconBtn}
             onClick={() => onView?.(product)}>
             <IconEye width={15} height={15} />
           </button>

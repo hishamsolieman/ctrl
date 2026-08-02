@@ -9,11 +9,13 @@ import {
   IconTag,
   IconSliders,
   IconTruck,
+  IconCart,
   IconChevronDown,
 } from "@/components/icons";
 
 const NAV = [
   { to: "/dashboard", key: "nav.dashboard", Icon: IconDashboard },
+  { to: "/pos", key: "nav.pos", Icon: IconCart },
   {
     key: "nav.products",
     Icon: IconBox,

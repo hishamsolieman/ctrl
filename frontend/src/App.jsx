@@ -6,6 +6,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
+import Cashier from "@/pages/Cashier";
 import Products from "@/pages/Products";
 import ProductCategories from "@/pages/ProductCategories";
 import ProductAttributes from "@/pages/ProductAttributes";
@@ -36,6 +37,7 @@ export default function App() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/pos" element={<Cashier />} />
             <Route path="/products" element={<Navigate to="/products/list" replace />} />
             <Route path="/products/list" element={<Products />} />
             <Route path="/products/categories" element={<ProductCategories />} />

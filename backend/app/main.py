@@ -14,6 +14,7 @@ from app.api.routes import (
     categories,
     images,
     meta,
+    pos,
     products,
     suppliers,
 )
@@ -46,6 +47,7 @@ app.include_router(categories.router)
 app.include_router(images.router)
 app.include_router(attributes.router)
 app.include_router(products.router)
+app.include_router(pos.router)
 
 
 @app.get("/")

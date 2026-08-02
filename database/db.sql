@@ -195,6 +195,74 @@ CREATE TABLE IF NOT EXISTS `product_images` (
     REFERENCES `product_variants`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Point of Sale: customers, payment methods, sales, holds ---------------------
+CREATE TABLE IF NOT EXISTS `customers` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `phone`      VARCHAR(40)  NULL UNIQUE,
+  `name`       VARCHAR(180) NOT NULL,
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `payment_methods` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `code`       VARCHAR(40) NOT NULL UNIQUE,
+  `name_en`    VARCHAR(80) NOT NULL,
+  `name_ar`    VARCHAR(80) NOT NULL,
+  `is_active`  TINYINT(1)  NOT NULL DEFAULT 1,
+  `sort_order` INT         NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `sales` (
+  `id`                INT AUTO_INCREMENT PRIMARY KEY,
+  `invoice_no`        VARCHAR(32) NOT NULL UNIQUE,
+  `user_id`           INT NULL,
+  `customer_id`       INT NULL,
+  `payment_method_id` INT NULL,
+  `customer_name`     VARCHAR(180) NULL,
+  `customer_phone`    VARCHAR(40)  NULL,
+  `payment_method`    VARCHAR(80)  NULL,
+  `item_count`        INT           NOT NULL DEFAULT 0,
+  `subtotal`          DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `discount`          DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `total`             DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `created_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_sales_user` (`user_id`),
+  KEY `idx_sales_customer` (`customer_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `sale_items` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `sale_id`    INT NOT NULL,
+  `product_id` INT NULL,
+  `variant_id` INT NULL,
+  `code`       VARCHAR(32)  NOT NULL,
+  `name`       VARCHAR(255) NOT NULL,
+  `unit_price` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `min_price`  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `quantity`   INT           NOT NULL DEFAULT 0,
+  `line_total` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  KEY `idx_sitem_sale` (`sale_id`),
+  KEY `idx_sitem_variant` (`variant_id`),
+  CONSTRAINT `fk_sitem_sale` FOREIGN KEY (`sale_id`)
+    REFERENCES `sales`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `sale_holds` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `hold_key`   VARCHAR(64) NOT NULL,
+  `variant_id` INT NOT NULL,
+  `quantity`   INT NOT NULL DEFAULT 0,
+  `user_id`    INT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_hold_key_variant` (`hold_key`, `variant_id`),
+  KEY `idx_hold_key` (`hold_key`),
+  KEY `idx_hold_variant` (`variant_id`),
+  CONSTRAINT `fk_hold_variant` FOREIGN KEY (`variant_id`)
+    REFERENCES `product_variants`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================ SEED DATA ======================================
 
 -- Roles -----------------------------------------------------------------------
@@ -224,6 +292,11 @@ INSERT IGNORE INTO `settings` (`key`, `value`) VALUES
   ('brand_name',  'CTRL'),
   ('brand_motto', 'Stay in CTRL.'),
   ('currency',    'EGP');
+
+-- Payment methods (configurable) ----------------------------------------------
+INSERT IGNORE INTO `payment_methods` (`id`, `code`, `name_en`, `name_ar`, `is_active`, `sort_order`) VALUES
+  (1, 'cash', 'Cash',      'نقدي',        1, 1),
+  (2, 'card', 'Bank Card', 'بطاقة بنكية', 1, 2);
 
 -- Categories (bilingual) ------------------------------------------------------
 INSERT IGNORE INTO `categories` (`id`, `name_en`, `name_ar`, `is_active`) VALUES
@@ -917,8 +990,8 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'products.title', 'en', 'Products'),
   ('ui', 'products.variantsCount', 'ar', '{{count}} أنواع'),
   ('ui', 'products.variantsCount', 'en', '{{count}} variants'),
-  ('ui', 'products.view', 'ar', 'عرض'),
-  ('ui', 'products.view', 'en', 'View'),
+  ('ui', 'products.viewAction', 'ar', 'عرض'),
+  ('ui', 'products.viewAction', 'en', 'View'),
   ('ui', 'products.view.category', 'ar', 'الفئة'),
   ('ui', 'products.view.category', 'en', 'Category'),
   ('ui', 'products.view.close', 'ar', 'إغلاق'),
@@ -1081,4 +1154,117 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'suppliers.confirmDelete.blocked', 'en', '"{{name}}" is used by {{count}} product(s) and cannot be deleted.'),
   ('ui', 'suppliers.confirmDelete.blocked', 'ar', 'المورّد "{{name}}" مستخدم في {{count}} منتج ولا يمكن حذفه.'),
   ('ui', 'suppliers.errors.nameTaken', 'en', 'A supplier with this name already exists.'),
-  ('ui', 'suppliers.errors.nameTaken', 'ar', 'يوجد مورّد بهذا الاسم بالفعل.');
+  ('ui', 'suppliers.errors.nameTaken', 'ar', 'يوجد مورّد بهذا الاسم بالفعل.'),
+  -- Navigation
+  ('ui', 'nav.pos', 'en', 'Point of Sale'),
+  ('ui', 'nav.pos', 'ar', 'نقطة البيع'),
+  -- POS page
+  ('ui', 'pos.title', 'en', 'Point of Sale'),
+  ('ui', 'pos.title', 'ar', 'نقطة البيع'),
+  ('ui', 'pos.subtitle', 'en', 'Scan products, manage carts and check out customers.'),
+  ('ui', 'pos.subtitle', 'ar', 'امسح المنتجات وأدر السلال وأتمم عمليات البيع.'),
+  ('ui', 'pos.tab', 'en', 'Cart {{n}}'),
+  ('ui', 'pos.tab', 'ar', 'سلة {{n}}'),
+  ('ui', 'pos.newTab', 'en', 'New cart'),
+  ('ui', 'pos.newTab', 'ar', 'سلة جديدة'),
+  ('ui', 'pos.maxTabs', 'en', 'You can open up to 5 carts at once.'),
+  ('ui', 'pos.maxTabs', 'ar', 'يمكنك فتح حتى 5 سلال في وقت واحد.'),
+  ('ui', 'pos.closeTab', 'en', 'Close cart'),
+  ('ui', 'pos.closeTab', 'ar', 'إغلاق السلة'),
+  ('ui', 'pos.closeConfirm.title', 'en', 'Close this cart?'),
+  ('ui', 'pos.closeConfirm.title', 'ar', 'إغلاق هذه السلة؟'),
+  ('ui', 'pos.closeConfirm.body', 'en', 'The cart items will be discarded and the held stock released.'),
+  ('ui', 'pos.closeConfirm.body', 'ar', 'سيتم تجاهل عناصر السلة وتحرير المخزون المحجوز.'),
+  ('ui', 'pos.closeConfirm.confirm', 'en', 'Close cart'),
+  ('ui', 'pos.closeConfirm.confirm', 'ar', 'إغلاق السلة'),
+  ('ui', 'pos.closeConfirm.cancel', 'en', 'Keep cart'),
+  ('ui', 'pos.closeConfirm.cancel', 'ar', 'الاحتفاظ بالسلة'),
+  -- Scan + cart
+  ('ui', 'pos.scan.placeholder', 'en', 'Scan or type a product code, then press Enter'),
+  ('ui', 'pos.scan.placeholder', 'ar', 'امسح أو اكتب كود المنتج ثم اضغط Enter'),
+  ('ui', 'pos.scan.label', 'en', 'Product code'),
+  ('ui', 'pos.scan.label', 'ar', 'كود المنتج'),
+  ('ui', 'pos.empty', 'en', 'No items yet — scan a product to begin.'),
+  ('ui', 'pos.empty', 'ar', 'لا توجد عناصر بعد — امسح منتجًا للبدء.'),
+  ('ui', 'pos.table.code', 'en', 'Code'),
+  ('ui', 'pos.table.code', 'ar', 'الكود'),
+  ('ui', 'pos.table.name', 'en', 'Product'),
+  ('ui', 'pos.table.name', 'ar', 'المنتج'),
+  ('ui', 'pos.table.price', 'en', 'Unit price'),
+  ('ui', 'pos.table.price', 'ar', 'سعر الوحدة'),
+  ('ui', 'pos.table.qty', 'en', 'Qty'),
+  ('ui', 'pos.table.qty', 'ar', 'الكمية'),
+  ('ui', 'pos.table.total', 'en', 'Total'),
+  ('ui', 'pos.table.total', 'ar', 'الإجمالي'),
+  ('ui', 'pos.table.actions', 'en', 'Actions'),
+  ('ui', 'pos.table.actions', 'ar', 'إجراءات'),
+  ('ui', 'pos.remove', 'en', 'Remove'),
+  ('ui', 'pos.remove', 'ar', 'إزالة'),
+  ('ui', 'pos.stats.items', 'en', 'Number of items'),
+  ('ui', 'pos.stats.items', 'ar', 'عدد العناصر'),
+  ('ui', 'pos.stats.discount', 'en', 'Discount'),
+  ('ui', 'pos.stats.discount', 'ar', 'الخصم'),
+  ('ui', 'pos.stats.total', 'en', 'Total Price'),
+  ('ui', 'pos.stats.total', 'ar', 'السعر الإجمالي'),
+  -- Warnings / errors (keys returned by the API)
+  ('ui', 'pos.errors.notFound', 'en', 'Product code not found.'),
+  ('ui', 'pos.errors.notFound', 'ar', 'كود المنتج غير موجود.'),
+  ('ui', 'pos.errors.outOfStock', 'en', 'Not enough stock available for this product.'),
+  ('ui', 'pos.errors.outOfStock', 'ar', 'لا يوجد مخزون كافٍ لهذا المنتج.'),
+  ('ui', 'pos.errors.stock', 'en', 'Not enough stock to complete the sale.'),
+  ('ui', 'pos.errors.stock', 'ar', 'لا يوجد مخزون كافٍ لإتمام البيع.'),
+  ('ui', 'pos.errors.priceBelowMin', 'en', 'This product cannot be sold below its minimum price.'),
+  ('ui', 'pos.errors.priceBelowMin', 'ar', 'لا يمكن بيع هذا المنتج بأقل من سعره الأدنى.'),
+  ('ui', 'pos.priceAdjusted', 'en', 'Price adjusted to the minimum allowed for {{name}}.'),
+  ('ui', 'pos.priceAdjusted', 'ar', 'تم تعديل السعر إلى الحد الأدنى المسموح لـ {{name}}.'),
+  ('ui', 'pos.qtyCapped', 'en', 'Only {{count}} left in stock for this product.'),
+  ('ui', 'pos.qtyCapped', 'ar', 'المتبقي في المخزون {{count}} فقط لهذا المنتج.'),
+  -- Wizard
+  ('ui', 'pos.step.cart', 'en', 'Cart'),
+  ('ui', 'pos.step.cart', 'ar', 'السلة'),
+  ('ui', 'pos.step.customer', 'en', 'Customer'),
+  ('ui', 'pos.step.customer', 'ar', 'العميل'),
+  ('ui', 'pos.step.invoice', 'en', 'Invoice'),
+  ('ui', 'pos.step.invoice', 'ar', 'الفاتورة'),
+  ('ui', 'pos.back', 'en', 'Back'),
+  ('ui', 'pos.back', 'ar', 'رجوع'),
+  ('ui', 'pos.next', 'en', 'Next'),
+  ('ui', 'pos.next', 'ar', 'التالي'),
+  ('ui', 'pos.cartEmpty', 'en', 'Add at least one item to continue.'),
+  ('ui', 'pos.cartEmpty', 'ar', 'أضف عنصرًا واحدًا على الأقل للمتابعة.'),
+  -- Customer step
+  ('ui', 'pos.customer.title', 'en', 'Customer information'),
+  ('ui', 'pos.customer.title', 'ar', 'معلومات العميل'),
+  ('ui', 'pos.customer.phone', 'en', 'Phone number'),
+  ('ui', 'pos.customer.phone', 'ar', 'رقم الهاتف'),
+  ('ui', 'pos.customer.phoneHint', 'en', 'Enter a phone number to auto-fill an existing customer.'),
+  ('ui', 'pos.customer.phoneHint', 'ar', 'أدخل رقم هاتف لملء بيانات عميل موجود تلقائيًا.'),
+  ('ui', 'pos.customer.name', 'en', 'Customer name'),
+  ('ui', 'pos.customer.name', 'ar', 'اسم العميل'),
+  ('ui', 'pos.customer.existing', 'en', 'Existing customer'),
+  ('ui', 'pos.customer.existing', 'ar', 'عميل موجود'),
+  ('ui', 'pos.customer.nameRequired', 'en', 'Customer name is required.'),
+  ('ui', 'pos.customer.nameRequired', 'ar', 'اسم العميل مطلوب.'),
+  ('ui', 'pos.payment.title', 'en', 'Payment method'),
+  ('ui', 'pos.payment.title', 'ar', 'طريقة الدفع'),
+  ('ui', 'pos.payment.required', 'en', 'Please choose a payment method.'),
+  ('ui', 'pos.payment.required', 'ar', 'يرجى اختيار طريقة دفع.'),
+  -- Invoice step
+  ('ui', 'pos.invoice.title', 'en', 'Invoice'),
+  ('ui', 'pos.invoice.title', 'ar', 'الفاتورة'),
+  ('ui', 'pos.invoice.number', 'en', 'Invoice No.'),
+  ('ui', 'pos.invoice.number', 'ar', 'رقم الفاتورة'),
+  ('ui', 'pos.invoice.date', 'en', 'Date'),
+  ('ui', 'pos.invoice.date', 'ar', 'التاريخ'),
+  ('ui', 'pos.invoice.customer', 'en', 'Customer'),
+  ('ui', 'pos.invoice.customer', 'ar', 'العميل'),
+  ('ui', 'pos.invoice.payment', 'en', 'Payment'),
+  ('ui', 'pos.invoice.payment', 'ar', 'الدفع'),
+  ('ui', 'pos.invoice.print', 'en', 'Print'),
+  ('ui', 'pos.invoice.print', 'ar', 'طباعة'),
+  ('ui', 'pos.invoice.newSale', 'en', 'New Sale'),
+  ('ui', 'pos.invoice.newSale', 'ar', 'عملية بيع جديدة'),
+  ('ui', 'pos.invoice.done', 'en', 'Sale completed successfully.'),
+  ('ui', 'pos.invoice.done', 'ar', 'تمت عملية البيع بنجاح.'),
+  ('ui', 'pos.invoice.thanks', 'en', 'Thank you for your purchase!'),
+  ('ui', 'pos.invoice.thanks', 'ar', 'شكرًا لتعاملكم معنا!');

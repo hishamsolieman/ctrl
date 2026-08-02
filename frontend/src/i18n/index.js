@@ -47,15 +47,26 @@ applyDirection(i18n.resolvedLanguage || "en");
 i18n.on("languageChanged", applyDirection);
 
 // Rebuild a nested object from flat dotted keys ("a.b.c" -> {a:{b:{c:...}}}).
+// Defensive against leaf/branch collisions (e.g. both "a.b" and "a.b.c"): a
+// branch always wins over a leaf, and a single bad key can never throw and take
+// down the whole locale bundle.
 function unflatten(flat) {
   const out = {};
   for (const [dotted, value] of Object.entries(flat || {})) {
     const parts = dotted.split(".");
     let node = out;
-    parts.forEach((p, i) => {
-      if (i === parts.length - 1) node[p] = value;
-      else node = node[p] = node[p] || {};
-    });
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const last = i === parts.length - 1;
+      if (last) {
+        // Don't clobber an existing branch object with a leaf string.
+        if (typeof node[p] !== "object" || node[p] === null) node[p] = value;
+      } else {
+        // Ensure an object exists to descend into (branch wins over leaf).
+        if (typeof node[p] !== "object" || node[p] === null) node[p] = {};
+        node = node[p];
+      }
+    }
   }
   return out;
 }

@@ -89,7 +89,7 @@ export default function ProductTable({
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-black transition hover:brightness-95">
                     <IconCart width={15} height={15} />
                   </button>
-                  <button title={t("products.view")} className={iconBtn} onClick={() => onView?.(p)}>
+                  <button title={t("products.viewAction")} className={iconBtn} onClick={() => onView?.(p)}>
                     <IconEye width={15} height={15} />
                   </button>
                   <button title={t("products.edit")} className={iconBtn} onClick={() => onEdit?.(p)}>
