@@ -245,7 +245,7 @@ export default function Suppliers() {
               </button>
             </div>
           ) : (
-            <table className="w-full border-collapse text-sm">
+            <table className="ctrl-table w-full border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-surface">
                 <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
                   <th className="px-4 py-3 text-start font-medium">{t("suppliers.table.name")}</th>

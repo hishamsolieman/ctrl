@@ -21,7 +21,7 @@ from app.api.deps import get_current_user, require_role
 from app.core.database import get_db
 from app.models.attribute import Attribute, AttributeValue
 from app.models.category import Category
-from app.models.product import Product, ProductImage, ProductVariant
+from app.models.product import Product, ProductImage, ProductVariant, VariantStock
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.schemas.product import ProductInput, ProductOut, VariantInput
@@ -77,8 +77,12 @@ def _live_variants(product: Product) -> list[ProductVariant]:
     return [v for v in product.variants if not v.is_deleted]
 
 
+def _variant_qty(variant: ProductVariant) -> int:
+    return sum(int(s.quantity or 0) for s in variant.stocks)
+
+
 def _product_qty(product: Product) -> int:
-    return sum(int(v.quantity or 0) for v in _live_variants(product))
+    return sum(_variant_qty(v) for v in _live_variants(product))
 
 
 def _image_id(url: str) -> int | str:
@@ -122,14 +126,18 @@ def _serialize(product: Product) -> dict[str, Any]:
         "note": product.note,
         "tags": product.tags,
         "attributes": product.attributes or {},
-        "quantity": sum(int(v.quantity or 0) for v in variants),
+        "quantity": _product_qty(product),
         "variants": [
             {
                 "id": v.id,
                 "code": v.code,
                 "attributes": v.attributes or {},
                 "images": [{"id": img.id, "url": img.url} for img in v.images],
-                "quantity": int(v.quantity or 0),
+                "stocks": [
+                    {"id": s.id, "attributes": s.attributes or {}, "quantity": int(s.quantity or 0)}
+                    for s in v.stocks
+                ],
+                "quantity": _variant_qty(v),
             }
             for v in variants
         ],
@@ -147,26 +155,34 @@ def _matches_search(product: Product, q: str) -> bool:
 
 
 def _matches_attributes(
-    product: Product, wanted: dict[int, set[int]], coding_ids: set[int]
+    product: Product, wanted: dict[int, set[int]], bucket: dict[int, str]
 ) -> bool:
     """A product matches when:
-    - every selected GLOBAL (non-coding) attribute is satisfied by the product's
-      shared selection, AND
-    - the selected CODING attributes are all satisfied by a single variant.
+    - every selected GLOBAL attribute is satisfied by the product's shared
+      selection, AND
+    - there is a single variant whose CODING selections satisfy the coding
+      constraints and which has a stock satisfying the STOCK constraints.
     """
-    global_wanted = {aid: vals for aid, vals in wanted.items() if aid not in coding_ids}
-    coding_wanted = {aid: vals for aid, vals in wanted.items() if aid in coding_ids}
+    global_w = {aid: vals for aid, vals in wanted.items() if bucket.get(aid) == "global"}
+    coding_w = {aid: vals for aid, vals in wanted.items() if bucket.get(aid) == "coding"}
+    stock_w = {aid: vals for aid, vals in wanted.items() if bucket.get(aid) == "stock"}
 
     prod_attrs = {int(k): int(v) for k, v in (product.attributes or {}).items()}
-    if not all(prod_attrs.get(aid) in vals for aid, vals in global_wanted.items()):
+    if not all(prod_attrs.get(aid) in vals for aid, vals in global_w.items()):
         return False
 
-    if not coding_wanted:
+    if not coding_w and not stock_w:
         return True
     for v in _live_variants(product):
-        attrs = {int(k): int(val) for k, val in (v.attributes or {}).items()}
-        if all(attrs.get(aid) in vals for aid, vals in coding_wanted.items()):
+        va = {int(k): int(val) for k, val in (v.attributes or {}).items()}
+        if not all(va.get(aid) in vals for aid, vals in coding_w.items()):
+            continue
+        if not stock_w:
             return True
+        for s in v.stocks:
+            sa = {int(k): int(val) for k, val in (s.attributes or {}).items()}
+            if all(sa.get(aid) in vals for aid, vals in stock_w.items()):
+                return True
     return False
 
 
@@ -174,6 +190,33 @@ def _apply_variant_images(variant: ProductVariant, urls: list[str] | None):
     variant.images.clear()
     for idx, url in enumerate((urls or [])[:5]):
         variant.images.append(ProductImage(url=url, sort_order=idx))
+
+
+def _stock_specs(vin: VariantInput) -> list[tuple[int | None, dict[str, int], int]]:
+    """(id, attributes, quantity) tuples for a variant's stock units. Falls back
+    to a single implicit stock carrying the variant's quantity when none given."""
+    if vin.stocks:
+        return [
+            (s.id, _norm_attrs(s.attributes), max(0, int(s.quantity or 0))) for s in vin.stocks
+        ]
+    return [(None, {}, max(0, int(vin.quantity or 0)))]
+
+
+def _apply_variant_stocks(variant: ProductVariant, specs: list[tuple[int | None, dict, int]]):
+    """Sync a variant's stock rows: update matched ids, add new, drop the rest."""
+    existing = {s.id: s for s in variant.stocks}
+    keep: set[int] = set()
+    for sid, attrs, qty in specs:
+        if sid and sid in existing:
+            st = existing[sid]
+            st.attributes = attrs
+            st.quantity = qty
+            keep.add(sid)
+        else:
+            variant.stocks.append(VariantStock(attributes=attrs, quantity=qty))
+    for sid, st in existing.items():
+        if sid not in keep:
+            variant.stocks.remove(st)  # cascade delete-orphan removes it
 
 
 def _set_product_code(db: Session, product: Product, raw_code: str | None):
@@ -224,6 +267,7 @@ def list_products(
         db.query(Product)
         .options(
             selectinload(Product.variants).selectinload(ProductVariant.images),
+            selectinload(Product.variants).selectinload(ProductVariant.stocks),
             selectinload(Product.category),
             selectinload(Product.supplier),
         )
@@ -266,11 +310,13 @@ def list_products(
                 aid = vmap.get(vid)
                 if aid is not None:
                     wanted.setdefault(aid, set()).add(vid)
-            coding_ids = {
-                a.id for a in db.query(Attribute.id, Attribute.coding)
-                .filter(Attribute.coding.is_(True)).all()
-            }
-            rows = [p for p in rows if _matches_attributes(p, wanted, coding_ids)]
+            # Classify each attribute into its bucket: global / coding / stock.
+            bucket: dict[int, str] = {}
+            for aid, is_global, coding in db.query(
+                Attribute.id, Attribute.is_global, Attribute.coding
+            ).all():
+                bucket[aid] = "global" if is_global else ("coding" if coding else "stock")
+            rows = [p for p in rows if _matches_attributes(p, wanted, bucket)]
 
     if sort == "price_asc":
         rows.sort(key=lambda p: float(p.price or 0))
@@ -357,6 +403,7 @@ def get_product(
         db.query(Product)
         .options(
             selectinload(Product.variants).selectinload(ProductVariant.images),
+            selectinload(Product.variants).selectinload(ProductVariant.stocks),
             selectinload(Product.category),
             selectinload(Product.supplier),
         )
@@ -387,14 +434,16 @@ async def upload_image(
 # --------------------------------------------------------------------------- #
 # Export / Import
 #
-# One CSV row per variant. Products are grouped by `product_code` (the product's
-# identifier). Category/supplier/attributes are exported as TEXT names, matched
-# back to ids case-insensitively on import. Images export as bare DB ids.
+# One CSV row per STOCK unit. Products are grouped by `product_code`; stock units
+# under the same variant share a `variant_code` and differ by `stock_attributes`.
+# Category/supplier/attributes are exported as TEXT names, matched back to ids
+# case-insensitively on import. Images export as bare DB ids.
 # --------------------------------------------------------------------------- #
 _EXPORT_COLUMNS = [
     "product_code", "name", "description", "category", "supplier",
     "supplier_price", "min_price", "price", "note", "tags",
-    "global_attributes", "variant_code", "variant_attributes", "quantity", "image_ids",
+    "global_attributes", "variant_code", "variant_attributes",
+    "stock_attributes", "quantity", "image_ids",
 ]
 
 
@@ -419,6 +468,7 @@ def export_products(
         db.query(Product)
         .options(
             selectinload(Product.variants).selectinload(ProductVariant.images),
+            selectinload(Product.variants).selectinload(ProductVariant.stocks),
             selectinload(Product.category),
             selectinload(Product.supplier),
         )
@@ -433,17 +483,23 @@ def export_products(
         sup = p.supplier.name if p.supplier else ""
         global_txt = json.dumps(_attrs_to_text(db, p.attributes), ensure_ascii=False)
         for v in _live_variants(p):
-            writer.writerow([
-                p.code, p.name, p.description or "", cat, sup,
-                float(p.supplier_price or 0), float(p.min_price or 0), float(p.price or 0),
-                p.note or "", json.dumps(p.tags or [], ensure_ascii=False),
-                global_txt, v.code,
-                json.dumps(_attrs_to_text(db, v.attributes), ensure_ascii=False),
-                int(v.quantity or 0),
-                # Only DB-backed image ids — never a filesystem path.
-                json.dumps([i for img in v.images if isinstance(i := _image_id(img.url), int)],
-                           ensure_ascii=False),
-            ])
+            v_attr_txt = json.dumps(_attrs_to_text(db, v.attributes), ensure_ascii=False)
+            # Only DB-backed image ids — never a filesystem path.
+            img_ids = json.dumps(
+                [i for img in v.images if isinstance(i := _image_id(img.url), int)],
+                ensure_ascii=False,
+            )
+            for s in (v.stocks or [None]):
+                s_attrs = s.attributes if s else {}
+                s_qty = int(s.quantity or 0) if s else 0
+                writer.writerow([
+                    p.code, p.name, p.description or "", cat, sup,
+                    float(p.supplier_price or 0), float(p.min_price or 0), float(p.price or 0),
+                    p.note or "", json.dumps(p.tags or [], ensure_ascii=False),
+                    global_txt, v.code, v_attr_txt,
+                    json.dumps(_attrs_to_text(db, s_attrs), ensure_ascii=False),
+                    s_qty, img_ids,
+                ])
     log_action(db, action="product.export", user_id=user.id, request=request)
     return StreamingResponse(
         iter([buf.getvalue().encode("utf-8-sig")]),
@@ -543,6 +599,7 @@ async def import_products(
         sup_id = sup_by_name.get((row.get("supplier") or "").strip().lower())
         global_attrs = _text_to_attrs(_json("global_attributes", {}), attr_by_name, val_by_attr)
         variant_attrs = _text_to_attrs(_json("variant_attributes", {}), attr_by_name, val_by_attr)
+        stock_attrs = _text_to_attrs(_json("stock_attributes", {}), attr_by_name, val_by_attr)
 
         # Resolve the product by code: reuse within this import, then the DB.
         # Match regardless of is_deleted — the code column is UNIQUE, so a
@@ -577,7 +634,8 @@ async def import_products(
         db.flush()
         session_products[product.code] = product
 
-        # Resolve the variant: update an existing one on THIS product, else add.
+        # Resolve the variant (code unit): update an existing one on THIS product,
+        # else add. Rows sharing a variant_code reuse the same variant.
         vcode = normalize_code(row.get("variant_code") or "")
         variant = None
         if vcode and is_valid_code(vcode):
@@ -595,12 +653,22 @@ async def import_products(
                 variant.code = make_variant_code(db, variant_attrs)
             variants += 1
         variant.attributes = variant_attrs
-        variant.quantity = _int("quantity")
 
+        # Images are variant-level (shared across stocks); the row re-applies them.
         raw_images = _json("image_ids", None)
         if raw_images is None:
             raw_images = _json("image_urls", [])  # backward-compat with older exports
         _apply_variant_images(variant, [_image_url(r) for r in (raw_images or [])[:5]])
+        db.flush()
+
+        # Resolve the stock unit within the variant by its non-coding attributes.
+        target = _norm_attrs(stock_attrs)
+        stock = next((s for s in variant.stocks if _norm_attrs(s.attributes) == target), None)
+        if stock is None:
+            stock = VariantStock(attributes=target, quantity=_int("quantity"))
+            variant.stocks.append(stock)
+        else:
+            stock.quantity = _int("quantity")
         db.flush()
 
     db.commit()
@@ -642,11 +710,12 @@ def create_product(
         variant = ProductVariant(
             product_id=product.id,
             attributes=_norm_attrs(vin.attributes),
-            quantity=vin.quantity,
         )
         _set_variant_code(db, variant, vin.code)
         _apply_variant_images(variant, vin.image_urls)
         product.variants.append(variant)
+        db.flush()
+        _apply_variant_stocks(variant, _stock_specs(vin))
         db.flush()
     db.commit()
     db.refresh(product)
@@ -685,20 +754,20 @@ def update_product(
         if vin.id and vin.id in existing:
             variant = existing[vin.id]
             variant.attributes = _norm_attrs(vin.attributes)
-            variant.quantity = vin.quantity
             _set_variant_code(db, variant, vin.code)
             _apply_variant_images(variant, vin.image_urls)
+            _apply_variant_stocks(variant, _stock_specs(vin))
             keep_ids.add(variant.id)
         else:
             variant = ProductVariant(
                 product_id=product.id,
                 attributes=_norm_attrs(vin.attributes),
-                quantity=vin.quantity,
             )
             _set_variant_code(db, variant, vin.code)
             _apply_variant_images(variant, vin.image_urls)
             product.variants.append(variant)
             db.flush()
+            _apply_variant_stocks(variant, _stock_specs(vin))
             keep_ids.add(variant.id)
     # Remove variants dropped during editing.
     for vid, variant in existing.items():

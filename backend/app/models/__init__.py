@@ -7,7 +7,7 @@ from app.models.supplier import Supplier
 from app.models.supplier_invoice import SupplierInvoice
 from app.models.image import Image
 from app.models.attribute import Attribute, AttributeValue
-from app.models.product import Product, ProductVariant, ProductImage
+from app.models.product import Product, ProductVariant, ProductImage, VariantStock
 from app.models.setting import Setting
 from app.models.customer import Customer
 from app.models.payment_method import PaymentMethod
@@ -28,6 +28,7 @@ __all__ = [
     "Product",
     "ProductVariant",
     "ProductImage",
+    "VariantStock",
     "Setting",
     "Customer",
     "PaymentMethod",

@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS `attributes` (
   `name_en`     VARCHAR(120) NOT NULL,
   `name_ar`     VARCHAR(120) NOT NULL,
   `is_required` TINYINT(1)   NOT NULL DEFAULT 0,
+  -- Global: one value shared across the whole product (coding requires NOT global).
+  `is_global`   TINYINT(1)   NOT NULL DEFAULT 0,
   `coding`      TINYINT(1)   NOT NULL DEFAULT 0,
   `sort_order`  INT DEFAULT 0,
   `is_active`   TINYINT(1)   NOT NULL DEFAULT 1,
@@ -166,8 +168,9 @@ CREATE TABLE IF NOT EXISTS `products` (
   CONSTRAINT `fk_products_supplier` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Product variants (size/colour combos): unique code + own images -------------
--- `attributes` is JSON {attribute_id: attribute_value_id}.
+-- Product variants = CODE UNITS (one per coding-attribute combo) --------------
+-- Owns the unique code + images. `attributes` is JSON {attr_id: value_id} of the
+-- CODING attributes only. `quantity` is legacy (on-hand now lives per stock unit).
 CREATE TABLE IF NOT EXISTS `product_variants` (
   `id`         INT AUTO_INCREMENT PRIMARY KEY,
   `product_id` INT NOT NULL,
@@ -182,6 +185,21 @@ CREATE TABLE IF NOT EXISTS `product_variants` (
   KEY `idx_variant_code` (`code`),
   CONSTRAINT `fk_variant_product` FOREIGN KEY (`product_id`)
     REFERENCES `products`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Variant stock units = sellable SKUs (non-global, non-coding attr combos) ------
+-- `attributes` is JSON {attr_id: value_id} of the non-global, non-coding
+-- attributes; `quantity` is the on-hand count for that exact combination.
+CREATE TABLE IF NOT EXISTS `product_variant_stocks` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `variant_id` INT NOT NULL,
+  `attributes` JSON NULL,
+  `quantity`   INT NOT NULL DEFAULT 0,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `idx_stock_variant` (`variant_id`),
+  CONSTRAINT `fk_stock_variant` FOREIGN KEY (`variant_id`)
+    REFERENCES `product_variants`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Product images (up to 5 per variant) ----------------------------------------
@@ -236,6 +254,7 @@ CREATE TABLE IF NOT EXISTS `sale_items` (
   `sale_id`    INT NOT NULL,
   `product_id` INT NULL,
   `variant_id` INT NULL,
+  `stock_id`   INT NULL,
   `code`       VARCHAR(32)  NOT NULL,
   `name`       VARCHAR(255) NOT NULL,
   `unit_price` DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -244,23 +263,25 @@ CREATE TABLE IF NOT EXISTS `sale_items` (
   `line_total` DECIMAL(12,2) NOT NULL DEFAULT 0,
   KEY `idx_sitem_sale` (`sale_id`),
   KEY `idx_sitem_variant` (`variant_id`),
+  KEY `idx_sitem_stock` (`stock_id`),
   CONSTRAINT `fk_sitem_sale` FOREIGN KEY (`sale_id`)
     REFERENCES `sales`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Holds reserve a STOCK unit (per cashier tab). Transient (2h TTL).
 CREATE TABLE IF NOT EXISTS `sale_holds` (
   `id`         INT AUTO_INCREMENT PRIMARY KEY,
   `hold_key`   VARCHAR(64) NOT NULL,
-  `variant_id` INT NOT NULL,
+  `stock_id`   INT NOT NULL,
   `quantity`   INT NOT NULL DEFAULT 0,
   `user_id`    INT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY `uq_hold_key_variant` (`hold_key`, `variant_id`),
+  UNIQUE KEY `uq_hold_key_stock` (`hold_key`, `stock_id`),
   KEY `idx_hold_key` (`hold_key`),
-  KEY `idx_hold_variant` (`variant_id`),
-  CONSTRAINT `fk_hold_variant` FOREIGN KEY (`variant_id`)
-    REFERENCES `product_variants`(`id`) ON DELETE CASCADE
+  KEY `idx_hold_stock` (`stock_id`),
+  CONSTRAINT `fk_hold_stock` FOREIGN KEY (`stock_id`)
+    REFERENCES `product_variant_stocks`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================ SEED DATA ======================================
@@ -273,14 +294,14 @@ INSERT IGNORE INTO `roles` (`name`, `level`, `description`) VALUES
   ('SuperAdmin', 40, 'Unrestricted, top-level system access.');
 
 -- Seed SuperAdmin -------------------------------------------------------------
--- Username: admin   Password: Oselfasads@eshta
+-- Username: admin   Password: Oselfasads@2
 -- password_hash below is a bcrypt hash of the password above (never stored plaintext).
 INSERT IGNORE INTO `users`
   (`username`, `full_name`, `password_hash`, `is_active`, `locale`, `role_id`)
 SELECT
   'admin',
   'Super Administrator',
-  '$2b$12$slP5XmthecGFOY.ZPiwD0.Qh4haYvwOxm9Ygm/g/vXyPbl5bMqVre',
+  '$2b$12$vT0W9.l3tIAwA1pFqVUDauderQCtJb8GnEgqNlfAnfisa5lOGpHK2',
   1,
   'en',
   r.`id`
@@ -310,10 +331,11 @@ INSERT IGNORE INTO `suppliers` (`id`, `name`, `phone`, `email`, `address`, `is_a
   (2, 'Cairo Textiles',   NULL, NULL, '15 El-Moez St, Cairo, Egypt', 1);
 
 -- Attribute definitions (Color, Size) + bilingual values ----------------------
--- Color is a `color` type; both opt into `coding` so each value carries a code.
-INSERT IGNORE INTO `attributes` (`id`, `key`, `type`, `name_en`, `name_ar`, `is_required`, `coding`, `sort_order`, `is_active`) VALUES
-  (1, 'color', 'color', 'Color', 'اللون',   0, 1, 1, 1),
-  (2, 'size',  'text',  'Size',  'المقاس', 0, 1, 2, 1);
+-- Color opts into `coding` (per code unit); Size is non-global + non-coding, so
+-- it becomes a per-stock attribute the cashier can switch at the POS.
+INSERT IGNORE INTO `attributes` (`id`, `key`, `type`, `name_en`, `name_ar`, `is_required`, `is_global`, `coding`, `sort_order`, `is_active`) VALUES
+  (1, 'color', 'color', 'Color', 'اللون',   0, 0, 1, 1, 1),
+  (2, 'size',  'text',  'Size',  'المقاس', 0, 0, 0, 2, 1);
 
 INSERT IGNORE INTO `attribute_values` (`id`, `attribute_id`, `value_en`, `value_ar`, `extra`, `sort_order`) VALUES
   (1, 1, 'Red',   'أحمر', '{"hex": "#dc2626"}', 1),
@@ -1268,3 +1290,24 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'pos.invoice.done', 'ar', 'تمت عملية البيع بنجاح.'),
   ('ui', 'pos.invoice.thanks', 'en', 'Thank you for your purchase!'),
   ('ui', 'pos.invoice.thanks', 'ar', 'شكرًا لتعاملكم معنا!');
+
+-- Attribute global/coding buckets + variant stock units (redesign) -----------
+INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
+  ('ui', 'products.attrs.modal.global', 'en', 'Global'),
+  ('ui', 'products.attrs.modal.global', 'ar', 'عام'),
+  ('ui', 'products.attrs.modal.globalHint', 'en', 'One value shared across the whole product (turn off to set it per variant/stock).'),
+  ('ui', 'products.attrs.modal.globalHint', 'ar', 'قيمة واحدة لكل المنتج (أوقفه لتحديدها لكل متغير/مخزون).'),
+  ('ui', 'products.attrs.col.global', 'en', 'Global'),
+  ('ui', 'products.attrs.col.global', 'ar', 'عام'),
+  ('ui', 'products.attrs.errors.codingGlobal', 'en', 'Coding can only be enabled for non-global attributes.'),
+  ('ui', 'products.attrs.errors.codingGlobal', 'ar', 'لا يمكن تفعيل الترميز إلا للخصائص غير العامة.'),
+  ('ui', 'products.attrs.errors.bucketLocked', 'en', 'This attribute is in use, so its Global/Coding setting cannot be changed.'),
+  ('ui', 'products.attrs.errors.bucketLocked', 'ar', 'هذه الخاصية قيد الاستخدام، لذا لا يمكن تغيير إعداد العام/الترميز.'),
+  ('ui', 'products.modal.stockUnits', 'en', 'Stock units'),
+  ('ui', 'products.modal.stockUnits', 'ar', 'وحدات المخزون'),
+  ('ui', 'products.modal.addStock', 'en', 'Add stock unit'),
+  ('ui', 'products.modal.addStock', 'ar', 'إضافة وحدة مخزون'),
+  ('ui', 'products.modal.removeStock', 'en', 'Remove stock unit'),
+  ('ui', 'products.modal.removeStock', 'ar', 'إزالة وحدة المخزون'),
+  ('ui', 'pos.table.soldOut', 'en', 'Sold out'),
+  ('ui', 'pos.table.soldOut', 'ar', 'نفد');

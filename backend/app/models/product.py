@@ -2,16 +2,20 @@
 
 - A ``Product`` holds the shared info (name, description, category, supplier,
   prices, note, tags).
-- Each ``ProductVariant`` is a unique size/colour(/...) combination with its own
-  unique ``code`` and its own images. A product always has at least one variant;
-  when no attributes are defined the single variant simply carries no attributes.
+- Each ``ProductVariant`` is the *code unit*: one per unique combination of the
+  *coding* attribute values. It owns the unique ``code`` and the images (images
+  are shared across the variant's stock units). A product always has at least one
+  variant; with no coding attributes it has a single implicit variant.
 - ``ProductVariant.attributes`` is a JSON map ``{attribute_id: attribute_value_id}``
-  holding only the *coding* attributes (the ones that differentiate variants).
-- ``Product.attributes`` holds the *global* (non-coding) attribute selections that
-  are shared across every variant of the product.
-- Prices use 2-decimal precision (DECIMAL(12,2)). Each variant carries its own
-  ``quantity``; a product's quantity is the sum across its variants. Deletion is
-  a SOFT delete.
+  holding only the *coding* attributes (the ones that compose the code).
+- ``VariantStock`` is the sellable stock unit under a variant: one per unique
+  combination of the *non-global, non-coding* attribute values, with its own
+  ``quantity``. A variant with no such attributes has a single implicit stock.
+- ``Product.attributes`` holds the *global* attribute selections shared across the
+  whole product.
+- Prices use 2-decimal precision (DECIMAL(12,2)). A variant's quantity is the sum
+  of its stock quantities; a product's quantity is the sum across its variants.
+  Deletion is a SOFT delete.
 """
 from __future__ import annotations
 
@@ -83,11 +87,12 @@ class ProductVariant(Base):
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # Unique code: >=3 uppercase alphanumeric chars (auto or custom).
+    # Unique code: exactly 8 uppercase alphanumeric chars (auto or custom).
     code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
-    # {attribute_id: attribute_value_id}
+    # {attribute_id: attribute_value_id} — coding attributes only.
     attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # On-hand stock for this variant; the product's quantity is the sum of these.
+    # Legacy column: on-hand is now tracked per VariantStock. Kept for migration
+    # (the initial stock backfill reads it) and backward compatibility.
     quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
@@ -103,6 +108,33 @@ class ProductVariant(Base):
         cascade="all, delete-orphan",
         order_by="ProductImage.sort_order",
     )
+    stocks: Mapped[list["VariantStock"]] = relationship(
+        back_populates="variant",
+        cascade="all, delete-orphan",
+        order_by="VariantStock.id",
+    )
+
+
+class VariantStock(Base):
+    """Sellable stock unit: a combination of non-global, non-coding attribute
+    values under a variant, with its own on-hand quantity. A variant with no such
+    attributes has exactly one stock (attributes == {})."""
+
+    __tablename__ = "product_variant_stocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    variant_id: Mapped[int] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # {attribute_id: attribute_value_id} — non-global, non-coding attributes only.
+    attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    variant: Mapped["ProductVariant"] = relationship(back_populates="stocks")
 
 
 class ProductImage(Base):

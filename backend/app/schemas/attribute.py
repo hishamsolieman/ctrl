@@ -19,6 +19,8 @@ class AttributeIn(BaseModel):
     name_en: str = Field(min_length=1, max_length=120)
     name_ar: str = Field(min_length=1, max_length=120)
     is_required: bool = False
+    # New attributes default to global (product-level, no variant explosion).
+    is_global: bool = True
     coding: bool = False
     values: list[AttributeValueIn] = Field(default_factory=list)
 
@@ -37,7 +39,8 @@ class AttributeOut(BaseModel):
     name_en: str
     name_ar: str
     is_required: bool
+    is_global: bool
     coding: bool
-    # True when at least one product variant references this attribute.
+    # True when at least one product references this attribute (global / variant / stock).
     in_use: bool = False
     values: list[AttributeValueOut]

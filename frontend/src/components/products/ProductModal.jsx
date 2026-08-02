@@ -73,8 +73,12 @@ function money(v) {
   return Number.isNaN(n) ? "" : n.toFixed(2);
 }
 
+function emptyStock() {
+  return { key: nextKey(), id: null, attributes: {}, quantity: 0 };
+}
+
 function emptyVariant() {
-  return { key: nextKey(), id: null, code: "", attributes: {}, images: [], quantity: 0 };
+  return { key: nextKey(), id: null, code: "", attributes: {}, images: [], stocks: [emptyStock()] };
 }
 
 function fromProduct(p, mode) {
@@ -94,16 +98,26 @@ function fromProduct(p, mode) {
     attributes: Object.fromEntries(
       Object.entries(p.attributes || {}).map(([k, val]) => [String(k), Number(val)])
     ),
-    variants: (p.variants || []).map((v) => ({
-      key: nextKey(),
-      id: isCopy ? null : v.id,
-      code: isCopy ? "" : v.code, // copy => new auto codes
-      attributes: Object.fromEntries(
-        Object.entries(v.attributes || {}).map(([k, val]) => [String(k), val])
-      ),
-      images: (v.images || []).map((im) => im.url),
-      quantity: v.quantity ?? 0,
-    })),
+    variants: (p.variants || []).map((v) => {
+      const stocks = (v.stocks || []).map((s) => ({
+        key: nextKey(),
+        id: isCopy ? null : s.id,
+        attributes: Object.fromEntries(
+          Object.entries(s.attributes || {}).map(([k, val]) => [String(k), Number(val)])
+        ),
+        quantity: s.quantity ?? 0,
+      }));
+      return {
+        key: nextKey(),
+        id: isCopy ? null : v.id,
+        code: isCopy ? "" : v.code, // copy => new auto codes
+        attributes: Object.fromEntries(
+          Object.entries(v.attributes || {}).map(([k, val]) => [String(k), Number(val)])
+        ),
+        images: (v.images || []).map((im) => im.url),
+        stocks: stocks.length ? stocks : [emptyStock()],
+      };
+    }),
   };
 }
 
@@ -206,22 +220,19 @@ export default function ProductModal({
     return t("products.modal.addTitle");
   }, [mode, t]);
 
-  // Coding attributes differentiate variants; non-coding ("global") attributes
-  // apply to the whole product (same across all variants).
-  const codingAttrs = attrs.filter((a) => a.coding);
-  const globalAttrs = attrs.filter((a) => !a.coding);
+  // Three attribute buckets:
+  //  - global: one value for the whole product (Product.attributes)
+  //  - coding (not global): a value per code unit / variant (drives the code)
+  //  - stock (not global, not coding): a value per sellable stock unit
+  const globalAttrs = attrs.filter((a) => a.is_global);
+  const codingAttrs = attrs.filter((a) => !a.is_global && a.coding);
+  const stockAttrs = attrs.filter((a) => !a.is_global && !a.coding);
   const hasVariants = codingAttrs.length > 0;
-  // Widen the modal as the variant table grows more columns, instead of
-  // forcing a horizontal scrollbar.
-  const modalSize = !hasVariants
-    ? "lg"
-    : codingAttrs.length <= 1
-      ? "lg"
-      : codingAttrs.length === 2
-        ? "xl"
-        : codingAttrs.length === 3
-          ? "2xl"
-          : "3xl";
+  const hasStockAttrs = stockAttrs.length > 0;
+  // Widen the modal as the attribute grids grow, instead of a horizontal scroll.
+  const widest = Math.max(codingAttrs.length, stockAttrs.length);
+  const modalSize =
+    widest >= 3 ? "3xl" : widest === 2 ? "2xl" : hasVariants || hasStockAttrs ? "xl" : "lg";
   const inputCls = "ctrl-input-sm w-full text-sm";
   const labelCls = "mb-1 block text-xs font-medium text-muted";
 
@@ -294,6 +305,8 @@ export default function ProductModal({
     setAttrs((prev) => prev.map((a) => (a.id === updatedAttr.id ? updatedAttr : a)));
     if (newValueId == null || !ctx) return;
     if (ctx.scope === "variant") setVariantAttr(ctx.key, updatedAttr.id, String(newValueId));
+    else if (ctx.scope === "stock")
+      setStockAttr(ctx.key, ctx.stockKey, updatedAttr.id, String(newValueId));
     else setGlobalAttr(updatedAttr.id, String(newValueId));
   }
 
@@ -354,6 +367,52 @@ export default function ProductModal({
       else delete attrs[String(attrId)];
       return { ...f, attributes: attrs };
     });
+  }
+
+  // ---- Stock units (per variant) ----
+  function updateStock(vKey, sKey, patch) {
+    setForm((f) => ({
+      ...f,
+      variants: f.variants.map((v) =>
+        v.key === vKey
+          ? { ...v, stocks: v.stocks.map((s) => (s.key === sKey ? { ...s, ...patch } : s)) }
+          : v
+      ),
+    }));
+  }
+  function setStockAttr(vKey, sKey, attrId, valueId) {
+    setForm((f) => ({
+      ...f,
+      variants: f.variants.map((v) => {
+        if (v.key !== vKey) return v;
+        return {
+          ...v,
+          stocks: v.stocks.map((s) => {
+            if (s.key !== sKey) return s;
+            const attrs = { ...s.attributes };
+            if (valueId) attrs[String(attrId)] = Number(valueId);
+            else delete attrs[String(attrId)];
+            return { ...s, attributes: attrs };
+          }),
+        };
+      }),
+    }));
+  }
+  function addStock(vKey) {
+    setForm((f) => ({
+      ...f,
+      variants: f.variants.map((v) =>
+        v.key === vKey ? { ...v, stocks: [...v.stocks, emptyStock()] } : v
+      ),
+    }));
+  }
+  function removeStock(vKey, sKey) {
+    setForm((f) => ({
+      ...f,
+      variants: f.variants.map((v) =>
+        v.key === vKey ? { ...v, stocks: v.stocks.filter((s) => s.key !== sKey) } : v
+      ),
+    }));
   }
 
   function imageErrorMessage(err, name) {
@@ -424,6 +483,85 @@ export default function ProductModal({
         )}
         <input ref={(el) => (fileRefs.current[v.key] = el)} type="file" accept="image/*"
           multiple className="hidden" onChange={(e) => onFiles(v.key, e)} />
+      </div>
+    );
+  }
+
+  // Sub-table of sellable stock units for a variant (one row per non-coding,
+  // non-global attribute combination), with its own quantity + add/remove.
+  function renderStockTable(v) {
+    return (
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="ctrl-table w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-elevated/40 text-xs text-muted">
+              {stockAttrs.map((attr) => (
+                <th key={attr.id} className="whitespace-nowrap px-3 py-2 text-start font-medium">
+                  {isAr ? attr.name_ar : attr.name_en}
+                  {attr.is_required && <span className="text-accent"> *</span>}
+                </th>
+              ))}
+              <th className="whitespace-nowrap px-3 py-2 text-start font-medium">
+                {t("products.modal.quantity")}
+              </th>
+              <th className="w-10 px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {v.stocks.map((s) => (
+              <tr key={s.key} className="border-b border-border align-top last:border-0">
+                {stockAttrs.map((attr) => (
+                  <td key={attr.id} className="px-3 py-2">
+                    <div className="min-w-[8.5rem]">
+                      <AttrValueSelect
+                        attr={attr}
+                        className={inputCls}
+                        value={s.attributes[String(attr.id)] || ""}
+                        onChange={(val) => setStockAttr(v.key, s.key, attr.id, val)}
+                        onAddValue={() =>
+                          setValueModal({ attr, scope: "stock", key: v.key, stockKey: s.key })
+                        }
+                      />
+                    </div>
+                  </td>
+                ))}
+                <td className="px-3 py-2">
+                  <input type="number" min="0" step="1" className={inputCls + " w-24"}
+                    value={s.quantity}
+                    onChange={(e) => updateStock(v.key, s.key, { quantity: e.target.value })} />
+                </td>
+                <td className="px-2 py-2">
+                  {v.stocks.length > 1 && (
+                    <button type="button" onClick={() => removeStock(v.key, s.key)}
+                      title={t("products.modal.removeStock")}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-red-400 hover:bg-red-500/10">
+                      <IconTrash width={15} height={15} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="border-t border-border p-2">
+          <button type="button" onClick={() => addStock(v.key)}
+            className="flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+            <IconPlus width={13} height={13} /> {t("products.modal.addStock")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Single implicit stock quantity (used when there are no stock attributes).
+  function renderSingleQty(v) {
+    const s = v.stocks[0];
+    if (!s) return null;
+    return (
+      <div className="w-40">
+        <input type="number" min="0" step="1" className={inputCls}
+          value={s.quantity}
+          onChange={(e) => updateStock(v.key, s.key, { quantity: e.target.value })} />
       </div>
     );
   }
@@ -499,6 +637,16 @@ export default function ProductModal({
         return;
       }
     }
+    // Required stock attributes must be selected on every stock unit.
+    for (const a of stockAttrs.filter((x) => x.is_required)) {
+      const missing = form.variants.some((v) =>
+        v.stocks.some((s) => !s.attributes[String(a.id)])
+      );
+      if (missing) {
+        toast.error(t("products.modal.requiredAttr", { name: isAr ? a.name_ar : a.name_en }));
+        return;
+      }
+    }
 
     // A name isn't an identifier: warn (don't block) when it's already used.
     try {
@@ -525,7 +673,11 @@ export default function ProductModal({
         code: v.code ? v.code.trim().toUpperCase() : null,
         attributes: pickAttrs(v.attributes, codingAttrs),
         image_urls: v.images,
-        quantity: Math.max(0, Math.trunc(Number(v.quantity) || 0)),
+        stocks: v.stocks.map((s) => ({
+          ...(mode === "edit" && s.id ? { id: s.id } : {}),
+          attributes: pickAttrs(s.attributes, stockAttrs),
+          quantity: Math.max(0, Math.trunc(Number(s.quantity) || 0)),
+        })),
       })),
     };
 
@@ -682,7 +834,9 @@ export default function ProductModal({
         )}
       </div>
 
-      {/* Variants — shown only when coding attributes exist */}
+      {/* Variants (code units) — shown only when coding attributes exist. Each
+          variant is a row; the stock column is a single quantity when there are
+          no stock attributes, or a compact stock sub-table when there are. */}
       {hasVariants ? (
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">
@@ -694,7 +848,7 @@ export default function ProductModal({
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
+            <table className="ctrl-table w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-elevated/40 text-xs text-muted">
                   <th className="whitespace-nowrap px-3 py-2 text-start font-medium">
@@ -707,7 +861,7 @@ export default function ProductModal({
                     </th>
                   ))}
                   <th className="whitespace-nowrap px-3 py-2 text-start font-medium">
-                    {t("products.modal.quantity")}
+                    {hasStockAttrs ? t("products.modal.stockUnits") : t("products.modal.quantity")}
                   </th>
                   <th className="px-3 py-2 text-start font-medium">
                     {t("products.modal.variantImages")}
@@ -736,9 +890,11 @@ export default function ProductModal({
                       </td>
                     ))}
                     <td className="px-3 py-2">
-                      <input type="number" min="0" step="1"
-                        className={inputCls + " w-20"} value={v.quantity}
-                        onChange={(e) => updateVariant(v.key, { quantity: e.target.value })} />
+                      {hasStockAttrs ? (
+                        <div className="min-w-[16rem]">{renderStockTable(v)}</div>
+                      ) : (
+                        renderSingleQty(v)
+                      )}
                     </td>
                     <td className="px-3 py-2">{renderImages(v, "h-12 w-12")}</td>
                     <td className="px-2 py-2">
@@ -759,22 +915,30 @@ export default function ProductModal({
       ) : (
         // No coding attributes: a single implicit piece — no "variant" wording.
         form.variants[0] && (
-          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className={labelCls}>{t("products.modal.code")}</label>
-              <CodeField className={inputCls} value={form.variants[0].code}
-                onChange={(v) => updateVariant(form.variants[0].key, { code: v })} />
+          <div className="mt-5 space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className={labelCls}>{t("products.modal.code")}</label>
+                <CodeField className={inputCls} value={form.variants[0].code}
+                  onChange={(v) => updateVariant(form.variants[0].key, { code: v })} />
+              </div>
+              {!hasStockAttrs && (
+                <div>
+                  <label className={labelCls}>{t("products.modal.quantity")}</label>
+                  {renderSingleQty(form.variants[0])}
+                </div>
+              )}
+              <div className="md:col-span-2">
+                <label className={labelCls}>{t("products.modal.images")}</label>
+                {renderImages(form.variants[0])}
+              </div>
             </div>
-            <div>
-              <label className={labelCls}>{t("products.modal.quantity")}</label>
-              <input type="number" min="0" step="1" className={inputCls}
-                value={form.variants[0].quantity}
-                onChange={(e) => updateVariant(form.variants[0].key, { quantity: e.target.value })} />
-            </div>
-            <div className="md:col-span-2">
-              <label className={labelCls}>{t("products.modal.images")}</label>
-              {renderImages(form.variants[0])}
-            </div>
+            {hasStockAttrs && (
+              <div>
+                <label className={labelCls}>{t("products.modal.stockUnits")}</label>
+                {renderStockTable(form.variants[0])}
+              </div>
+            )}
           </div>
         )
       )}

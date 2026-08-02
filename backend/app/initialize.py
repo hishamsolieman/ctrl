@@ -125,6 +125,48 @@ def patch_schema() -> None:
                     f"MODIFY COLUMN `{col}` DECIMAL(12,2) DEFAULT 0"
                 )
 
+        def _has_col(table: str, col: str) -> bool:
+            return bool(
+                conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                        "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :t AND COLUMN_NAME = :c"
+                    ),
+                    {"db": settings.DB_NAME, "t": table, "c": col},
+                ).scalar()
+            )
+
+        # attributes.is_global — new independent flag. Existing installs preserve
+        # behavior: non-coding attributes were effectively global before.
+        if not _has_col("attributes", "is_global"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `attributes` "
+                "ADD COLUMN `is_global` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_required`"
+            )
+            conn.exec_driver_sql("UPDATE `attributes` SET `is_global` = 1 WHERE `coding` = 0")
+
+        # sale_items.stock_id — link a sold line to its stock unit (history).
+        if not _has_col("sale_items", "stock_id"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `sale_items` ADD COLUMN `stock_id` INT NULL AFTER `variant_id`, "
+                "ADD INDEX `ix_sale_items_stock_id` (`stock_id`)"
+            )
+
+        # Backfill one stock unit per existing variant that has none, carrying the
+        # legacy per-variant quantity. Idempotent via NOT EXISTS.
+        conn.exec_driver_sql(
+            "INSERT INTO `product_variant_stocks` (`variant_id`, `attributes`, `quantity`) "
+            "SELECT pv.id, NULL, pv.quantity FROM `product_variants` pv "
+            "WHERE NOT EXISTS (SELECT 1 FROM `product_variant_stocks` s "
+            "WHERE s.variant_id = pv.id)"
+        )
+
+        # sale_holds now reserves a STOCK unit, not a variant. Holds are transient
+        # (2h TTL), so an old-schema table is simply dropped and recreated.
+        if _has_col("sale_holds", "variant_id"):
+            conn.exec_driver_sql("DROP TABLE `sale_holds`")
+            Base.metadata.tables["sale_holds"].create(bind=conn)
+
 
 def _split_statements(sql: str) -> list[str]:
     """Strip line comments/blank lines and split into individual statements."""

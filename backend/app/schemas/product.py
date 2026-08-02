@@ -6,12 +6,27 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+class StockInput(BaseModel):
+    id: int | None = None  # present when editing an existing stock unit
+    # {attribute_id: attribute_value_id} — non-global, non-coding attributes
+    attributes: dict[str, int] | None = None
+    quantity: int = 0
+
+    @field_validator("quantity")
+    @classmethod
+    def _non_negative_qty(cls, v):
+        return max(0, int(v or 0))
+
+
 class VariantInput(BaseModel):
     id: int | None = None  # present when editing an existing variant
     code: str | None = None  # blank -> auto-generated
-    # {attribute_id: attribute_value_id}
+    # {attribute_id: attribute_value_id} — coding attributes only
     attributes: dict[str, int] | None = None
     image_urls: list[str] | None = None
+    # Stock units under this variant. When omitted, a single implicit stock is
+    # created carrying ``quantity`` (used when there are no non-coding attributes).
+    stocks: list[StockInput] | None = None
     quantity: int = 0
 
     @field_validator("image_urls")
@@ -61,12 +76,19 @@ class ImageOut(BaseModel):
     url: str
 
 
+class StockOut(BaseModel):
+    id: int
+    attributes: dict[str, int] | None
+    quantity: int
+
+
 class VariantOut(BaseModel):
     id: int
     code: str
     attributes: dict[str, int] | None
     images: list[ImageOut]
-    quantity: int
+    stocks: list[StockOut]
+    quantity: int  # sum of this variant's stock quantities
 
 
 class ProductOut(BaseModel):

@@ -103,6 +103,37 @@ html[dir="rtl"] body {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Shared data table look: distinct header colour, centered header + cells,    */
+/* and alternating row stripes tuned for the dark theme. Add the `ctrl-table`  */
+/* class to a <table>; the compound selectors below outrank Tailwind's         */
+/* single-class `text-start/text-end` utilities so per-cell alignment on the   */
+/* markup is overridden without editing every cell.                            */
+/* -------------------------------------------------------------------------- */
+.ctrl-table thead th {
+  background-color: rgb(var(--ctrl-border));
+  color: rgb(var(--ctrl-text));
+  text-align: center;
+  vertical-align: middle;
+}
+.ctrl-table tbody td {
+  text-align: center;
+  vertical-align: middle;
+}
+/* Zebra striping: odd rows show the container behind them, even rows a subtle
+   elevated tint. Applied to cells so it sits above the table background. */
+.ctrl-table tbody tr:nth-child(even) td {
+  background-color: rgb(var(--ctrl-elevated) / 0.5);
+}
+.ctrl-table tbody tr:hover td {
+  background-color: rgb(var(--ctrl-elevated) / 0.9);
+}
+/* Flex layouts inside cells (e.g. action buttons) ignore text-align, so center
+   them explicitly to match the centered columns. */
+.ctrl-table tbody td > .flex {
+  justify-content: center;
+}
+
 /* Single-line inputs and selects clip overly-long text/placeholders with an
    ellipsis instead of hard-cutting them. The full value is surfaced on hover
    via a title attribute set automatically (see lib/autoTitle.js). Textareas are

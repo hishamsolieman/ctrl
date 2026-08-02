@@ -177,6 +177,22 @@ export default function ProductViewModal({ open, product, attributes, currency, 
                     </div>
                   )}
                 </div>
+
+                {/* Stock unit breakdown (only meaningful when stocks carry attrs) */}
+                {Array.isArray(v.stocks) &&
+                  v.stocks.some((s) => Object.keys(s.attributes || {}).length > 0) && (
+                    <div className="mt-3 space-y-1 border-t border-border/60 pt-2">
+                      {v.stocks.map((s) => (
+                        <div key={s.id}
+                          className="flex items-center justify-between gap-2 rounded-md bg-elevated/40 px-2 py-1">
+                          <div className="flex flex-wrap gap-1.5">{attrChips(s.attributes)}</div>
+                          <span className="whitespace-nowrap text-xs text-muted">
+                            {t("products.detail.quantity")}: {Number(s.quantity || 0)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
               </div>
             ))}
           </div>

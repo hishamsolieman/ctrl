@@ -33,6 +33,10 @@ class Attribute(Base):
     name_ar: Mapped[str] = mapped_column(String(120), nullable=False)
     # Mandatory when adding a product (a value must be selected).
     is_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Global: one value shared across the whole product (stored on Product).
+    # When NOT global the attribute is chosen per code-unit (coding) or per
+    # stock unit (non-coding). Coding may only be enabled when NOT global.
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Advanced: this attribute's values contribute to the variant code.
     coding: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)

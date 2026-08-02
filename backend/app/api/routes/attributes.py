@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_current_user, require_role
 from app.core.database import get_db
 from app.models.attribute import Attribute, AttributeValue
-from app.models.product import Product, ProductVariant
+from app.models.product import Product, ProductVariant, VariantStock
 from app.models.user import User
 from app.schemas.attribute import AttributeIn, AttributeOut
 from app.services.logging import log_action
@@ -53,23 +53,35 @@ def _unique_key(db: Session, base: str, exclude_id: int | None = None) -> str:
 
 
 def _usage(db: Session) -> tuple[set[int], set[int]]:
-    """(attribute_ids, value_ids) referenced by live (non-deleted) variants."""
+    """(attribute_ids, value_ids) referenced by live products through any bucket:
+    global (Product.attributes), coding (ProductVariant.attributes) or stock
+    (VariantStock.attributes)."""
     attr_ids: set[int] = set()
     val_ids: set[int] = set()
-    rows = (
-        db.query(ProductVariant)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .filter(Product.is_deleted.is_(False), ProductVariant.is_deleted.is_(False))
-        .all()
-    )
-    for v in rows:
-        for k, val in (v.attributes or {}).items():
+
+    def _collect(m) -> None:
+        for k, val in (m or {}).items():
             try:
                 attr_ids.add(int(k))
                 if val:
                     val_ids.add(int(val))
             except (TypeError, ValueError):
                 continue
+
+    products = (
+        db.query(Product)
+        .options(selectinload(Product.variants).selectinload(ProductVariant.stocks))
+        .filter(Product.is_deleted.is_(False))
+        .all()
+    )
+    for p in products:
+        _collect(p.attributes)
+        for v in p.variants:
+            if v.is_deleted:
+                continue
+            _collect(v.attributes)
+            for s in v.stocks:
+                _collect(s.attributes)
     return attr_ids, val_ids
 
 
@@ -81,6 +93,7 @@ def _serialize(attr: Attribute, used_attr_ids: set[int]) -> dict:
         "name_en": attr.name_en,
         "name_ar": attr.name_ar,
         "is_required": attr.is_required,
+        "is_global": attr.is_global,
         "coding": attr.coding,
         "in_use": attr.id in used_attr_ids,
         "values": [
@@ -116,23 +129,53 @@ def _default_value(db: Session, attr: Attribute) -> AttributeValue:
     return dv
 
 
+def _first_value(attr: Attribute) -> AttributeValue | None:
+    """The attribute's first (lowest sort_order) live value, used as the default
+    when the attribute becomes required."""
+    live = sorted(
+        (v for v in attr.values if not v.is_deleted), key=lambda v: (v.sort_order, v.id)
+    )
+    return live[0] if live else None
+
+
 def _backfill_required(db: Session, attr: Attribute) -> None:
-    """Assign the default value to every live variant that lacks this attribute."""
+    """Assign the attribute's first value to every live product that lacks it,
+    writing to the right bucket: global -> Product, coding -> ProductVariant,
+    otherwise -> each VariantStock. Falls back to a placeholder value only when
+    the attribute has no values at all."""
     if not attr.is_required:
         return
-    dv = _default_value(db, attr)
-    rows = (
-        db.query(ProductVariant)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .filter(Product.is_deleted.is_(False), ProductVariant.is_deleted.is_(False))
+    dv = _first_value(attr) or _default_value(db, attr)
+    key = str(attr.id)
+    products = (
+        db.query(Product)
+        .options(selectinload(Product.variants).selectinload(ProductVariant.stocks))
+        .filter(Product.is_deleted.is_(False))
         .all()
     )
-    key = str(attr.id)
-    for v in rows:
-        attrs = dict(v.attributes or {})
-        if not attrs.get(key):
-            attrs[key] = dv.id
-            v.attributes = attrs  # reassign so SQLAlchemy flags the JSON dirty
+    for p in products:
+        if attr.is_global:
+            attrs = dict(p.attributes or {})
+            if not attrs.get(key):
+                attrs[key] = dv.id
+                p.attributes = attrs
+        elif attr.coding:
+            for v in p.variants:
+                if v.is_deleted:
+                    continue
+                attrs = dict(v.attributes or {})
+                if not attrs.get(key):
+                    attrs[key] = dv.id
+                    v.attributes = attrs
+        else:  # non-global, non-coding -> stock units
+            for v in p.variants:
+                if v.is_deleted:
+                    continue
+                for s in v.stocks:
+                    attrs = dict(s.attributes or {})
+                    if not attrs.get(key):
+                        attrs[key] = dv.id
+                        s.attributes = attrs
 
 
 def _ensure_unique_name(db: Session, name_en: str, name_ar: str, exclude_id: int | None = None) -> None:
@@ -148,6 +191,12 @@ def _ensure_unique_name(db: Session, name_en: str, name_ar: str, exclude_id: int
         raise HTTPException(status.HTTP_409_CONFLICT, "products.attrs.errors.nameEnUsed")
     if any((a.name_ar or "").strip().lower() == ar for a in rows):
         raise HTTPException(status.HTTP_409_CONFLICT, "products.attrs.errors.nameArUsed")
+
+
+def _validate_flags(payload: AttributeIn) -> None:
+    """Coding may only be enabled when the attribute is NOT global."""
+    if payload.coding and payload.is_global:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "products.attrs.errors.codingGlobal")
 
 
 def _validate_unique_values(payload: AttributeIn) -> None:
@@ -220,7 +269,7 @@ def list_attributes(db: Session = Depends(get_db), _u: User = Depends(get_curren
 # --------------------------------------------------------------------------- #
 # Export / Import (CSV)
 # --------------------------------------------------------------------------- #
-_EXPORT_COLUMNS = ["name_en", "name_ar", "type", "is_required", "coding", "values"]
+_EXPORT_COLUMNS = ["name_en", "name_ar", "type", "is_required", "is_global", "coding", "values"]
 
 
 def _truthy(value) -> bool:
@@ -264,7 +313,7 @@ def export_attributes(
             vals.append(item)
         w.writerow([
             a.name_en, a.name_ar, a.type,
-            int(bool(a.is_required)), int(bool(a.coding)),
+            int(bool(a.is_required)), int(bool(a.is_global)), int(bool(a.coding)),
             json.dumps(vals, ensure_ascii=False),
         ])
     log_action(db, action="attribute.export", user_id=user.id, request=request)
@@ -312,13 +361,20 @@ async def import_attributes(
         except (ValueError, TypeError):
             raw_vals = []
 
+        coding = _truthy(row.get("coding"))
+        # Legacy exports had no is_global column; back then non-coding meant global.
+        raw_global = row.get("is_global")
+        is_global = (not coding) if raw_global is None else _truthy(raw_global)
+        if coding:
+            is_global = False  # coding implies not-global
         attr = Attribute(
             key=_unique_key(db, name_en),
             type=atype,
             name_en=name_en,
             name_ar=name_ar,
             is_required=_truthy(row.get("is_required")),
-            coding=_truthy(row.get("coding")),
+            is_global=is_global,
+            coding=coding,
         )
         db.add(attr)
         db.flush()
@@ -366,6 +422,7 @@ def create_attribute(
     db: Session = Depends(get_db),
     user: User = Depends(require_role("Moderator")),
 ):
+    _validate_flags(payload)
     _ensure_unique_name(db, payload.name_en, payload.name_ar)
     _validate_unique_values(payload)
     attr = Attribute(
@@ -374,6 +431,7 @@ def create_attribute(
         name_en=payload.name_en,
         name_ar=payload.name_ar,
         is_required=payload.is_required,
+        is_global=payload.is_global,
         coding=payload.coding,
     )
     db.add(attr)
@@ -400,13 +458,21 @@ def update_attribute(
     attr = db.get(Attribute, attribute_id)
     if not attr or attr.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Attribute not found")
+    _validate_flags(payload)
     _ensure_unique_name(db, payload.name_en, payload.name_ar, exclude_id=attribute_id)
     _validate_unique_values(payload)
+    # Changing an attribute's bucket (global/coding) after products reference it
+    # would orphan the existing selections, so lock those flags while in use.
+    if attr.is_global != payload.is_global or attr.coding != payload.coding:
+        used_attr_ids, _ = _usage(db)
+        if attribute_id in used_attr_ids:
+            raise HTTPException(status.HTTP_409_CONFLICT, "products.attrs.errors.bucketLocked")
     was_required = attr.is_required
     attr.type = payload.type
     attr.name_en = payload.name_en
     attr.name_ar = payload.name_ar
     attr.is_required = payload.is_required
+    attr.is_global = payload.is_global
     attr.coding = payload.coding
     _, used_value_ids = _usage(db)
     _apply_values(db, attr, payload, used_value_ids)

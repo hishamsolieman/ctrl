@@ -33,9 +33,10 @@ export default function AttributeViewModal({ open, attribute, onClose }) {
           <h3 className="text-lg font-bold text-text">{isAr ? a.name_ar : a.name_en}</h3>
           <p className="text-sm text-muted">{isAr ? a.name_en : a.name_ar}</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           {field(t("products.attrs.modal.type"), <Badge tone="accent">{t(`products.attrs.type.${a.type}`)}</Badge>)}
           {field(t("products.attrs.col.mandatory"), <Badge tone={a.is_required ? "accent" : "muted"}>{a.is_required ? t("products.attrs.yes") : t("products.attrs.no")}</Badge>)}
+          {field(t("products.attrs.col.global"), <Badge tone={a.is_global ? "accent" : "muted"}>{a.is_global ? t("products.attrs.yes") : t("products.attrs.no")}</Badge>)}
           {field(t("products.attrs.col.coding"), <Badge tone={a.coding ? "accent" : "muted"}>{a.coding ? t("products.attrs.yes") : t("products.attrs.no")}</Badge>)}
           {field(t("products.attrs.col.values"), <span>{(a.values || []).length}</span>)}
         </div>

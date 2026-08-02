@@ -210,13 +210,14 @@ export default function ProductAttributes() {
               </button>
             </div>
           ) : (
-            <table className="w-full border-collapse text-sm">
+            <table className="ctrl-table w-full border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-surface">
                 <tr className="border-b border-border text-start text-xs uppercase tracking-wide text-muted">
                   <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.name")}</th>
                   <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.type")}</th>
                   <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.values")}</th>
                   <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.mandatory")}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.global")}</th>
                   <th className="px-4 py-3 text-start font-medium">{t("products.attrs.col.coding")}</th>
                   <th className="px-4 py-3 text-end font-medium">{t("products.attrs.col.actions")}</th>
                 </tr>
@@ -240,6 +241,11 @@ export default function ProductAttributes() {
                     <td className="px-4 py-3">
                       <Badge tone={a.is_required ? "accent" : "muted"}>
                         {a.is_required ? t("products.attrs.yes") : t("products.attrs.no")}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone={a.is_global ? "accent" : "muted"}>
+                        {a.is_global ? t("products.attrs.yes") : t("products.attrs.no")}
                       </Badge>
                     </td>
                     <td className="px-4 py-3">

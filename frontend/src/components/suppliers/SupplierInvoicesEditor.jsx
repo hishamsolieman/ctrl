@@ -125,7 +125,7 @@ export default function SupplierInvoicesEditor({ invoices, onAdd, onDelete, curr
 
       {/* Invoices table */}
       <div className="overflow-hidden rounded-xl border border-border">
-        <table className="w-full text-sm">
+        <table className="ctrl-table w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-elevated/40 text-xs text-muted">
               <th className="px-3 py-2 text-start font-medium">{t("suppliers.invoices.name")}</th>

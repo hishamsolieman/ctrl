@@ -54,6 +54,9 @@ class SaleItem(Base):
     variant_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_variants.id"), nullable=True, index=True
     )
+    stock_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variant_stocks.id"), nullable=True, index=True
+    )
 
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)

@@ -21,7 +21,8 @@ function toValue(v) {
 }
 
 function blank() {
-  return { type: "text", name_en: "", name_ar: "", is_required: false, coding: false, values: [] };
+  // New attributes default to global (product-level; coding requires not-global).
+  return { type: "text", name_en: "", name_ar: "", is_required: false, is_global: true, coding: false, values: [] };
 }
 
 export default function AttributeModal({ open, mode, initial, onClose, onSaved }) {
@@ -41,6 +42,7 @@ export default function AttributeModal({ open, mode, initial, onClose, onSaved }
         name_en: isCopy ? "" : initial.name_en || "",
         name_ar: isCopy ? "" : initial.name_ar || "",
         is_required: !!initial.is_required,
+        is_global: initial.is_global ?? true,
         coding: !!initial.coding,
         values: (initial.values || []).map((v) => ({ ...toValue(v), id: isCopy ? null : v.id })),
       });
@@ -105,7 +107,8 @@ export default function AttributeModal({ open, mode, initial, onClose, onSaved }
       name_en: form.name_en.trim(),
       name_ar: form.name_ar.trim(),
       is_required: form.is_required,
-      coding: form.coding,
+      is_global: form.is_global,
+      coding: form.coding && !form.is_global,
       values,
     };
     setSaving(true);
@@ -186,8 +189,17 @@ export default function AttributeModal({ open, mode, initial, onClose, onSaved }
           </label>
         </div>
         <div className="flex flex-wrap gap-4">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
+          <label className={`flex items-center gap-2 text-sm text-text ${inUse ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+            <input type="checkbox" className="ctrl-check" checked={form.is_global} disabled={inUse}
+              onChange={(e) => set(e.target.checked ? { is_global: true, coding: false } : { is_global: false })} />
+            {t("products.attrs.modal.global")}
+            <span className="text-xs text-muted">— {t("products.attrs.modal.globalHint")}</span>
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          <label className={`flex items-center gap-2 text-sm ${form.is_global || inUse ? "cursor-not-allowed opacity-60 text-muted" : "cursor-pointer text-text"}`}>
             <input type="checkbox" className="ctrl-check" checked={form.coding}
+              disabled={form.is_global || inUse}
               onChange={(e) => set({ coding: e.target.checked })} />
             {t("products.attrs.modal.coding")}
             <span className="text-xs text-muted">— {t("products.attrs.modal.codingHint")}</span>

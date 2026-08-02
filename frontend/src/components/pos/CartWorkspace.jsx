@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
-import { posScan, posSetQty, posRelease, posCheckout, lookupCustomer } from "@/lib/pos";
+import { posScan, posSetQty, posSwitch, posRelease, posCheckout, lookupCustomer } from "@/lib/pos";
 import { mediaUrl } from "@/lib/products";
 import {
   IconSearch,
@@ -128,34 +128,47 @@ export default function CartWorkspace({ tab, boot, patch }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.customer.phone]);
 
-  // ---- Item operations ----
+  // ---- Item operations (cart lines are keyed by stock_id) ----
+  const mapLine = (line) => ({
+    stock_id: line.stock_id,
+    variant_id: line.variant_id,
+    product_id: line.product_id,
+    code: line.code,
+    name: line.name,
+    variant_en: line.variant_en,
+    variant_ar: line.variant_ar,
+    image: line.image,
+    price: line.price,
+    min_price: line.min_price,
+    quantity: line.quantity,
+    available: line.available,
+    on_hand: line.on_hand,
+    nc_attrs: line.nc_attrs || [],
+    selected: line.selected || {},
+    siblings: line.siblings || [],
+  });
+
   const upsertLine = (line) =>
     patch((tb) => {
-      const found = tb.items.find((i) => i.variant_id === line.variant_id);
-      const next = {
-        variant_id: line.variant_id,
-        product_id: line.product_id,
-        code: line.code,
-        name: line.name,
-        variant_en: line.variant_en,
-        variant_ar: line.variant_ar,
-        image: line.image,
-        price: line.price,
-        min_price: line.min_price,
-        quantity: line.quantity,
-        available: line.available,
-        on_hand: line.on_hand,
-      };
+      const found = tb.items.find((i) => i.stock_id === line.stock_id);
       if (found) {
         return {
           items: tb.items.map((i) =>
-            i.variant_id === line.variant_id
-              ? { ...i, quantity: line.quantity, available: line.available, on_hand: line.on_hand }
+            i.stock_id === line.stock_id
+              ? {
+                  ...i,
+                  quantity: line.quantity,
+                  available: line.available,
+                  on_hand: line.on_hand,
+                  nc_attrs: line.nc_attrs || [],
+                  selected: line.selected || {},
+                  siblings: line.siblings || [],
+                }
               : i
           ),
         };
       }
-      return { items: [...tb.items, { ...next, unit_price: line.price }] };
+      return { items: [...tb.items, { ...mapLine(line), unit_price: line.price }] };
     });
 
   async function handleScan() {
@@ -174,20 +187,26 @@ export default function CartWorkspace({ tab, boot, patch }) {
 
   async function commitQty(item, q) {
     setQtyDraft((d) => {
-      const { [item.variant_id]: _drop, ...rest } = d;
+      const { [item.stock_id]: _drop, ...rest } = d;
       return rest;
     });
     if (q <= 0) return removeItem(item);
     try {
-      const line = await posSetQty(tab.holdKey, item.variant_id, q);
+      const line = await posSetQty(tab.holdKey, item.stock_id, q);
       if (line.capped) toast.info(t("pos.qtyCapped", { count: line.quantity }));
       if ((line.quantity || 0) <= 0) {
-        patch((tb) => ({ items: tb.items.filter((i) => i.variant_id !== item.variant_id) }));
+        patch((tb) => ({ items: tb.items.filter((i) => i.stock_id !== item.stock_id) }));
       } else {
         patch((tb) => ({
           items: tb.items.map((i) =>
-            i.variant_id === item.variant_id
-              ? { ...i, quantity: line.quantity, available: line.available, on_hand: line.on_hand }
+            i.stock_id === item.stock_id
+              ? {
+                  ...i,
+                  quantity: line.quantity,
+                  available: line.available,
+                  on_hand: line.on_hand,
+                  siblings: line.siblings || i.siblings,
+                }
               : i
           ),
         }));
@@ -197,10 +216,29 @@ export default function CartWorkspace({ tab, boot, patch }) {
     }
   }
 
-  async function removeItem(item) {
-    patch((tb) => ({ items: tb.items.filter((i) => i.variant_id !== item.variant_id) }));
+  // Switch a line's non-coding attribute (e.g. size) to an in-stock sibling.
+  async function doSwitch(item, attrId, valueId) {
+    if (!valueId) return;
+    const target = { ...(item.selected || {}), [String(attrId)]: Number(valueId) };
     try {
-      await posRelease(tab.holdKey, item.variant_id);
+      const line = await posSwitch(tab.holdKey, item.stock_id, target);
+      if (line.capped) toast.info(t("pos.qtyCapped", { count: line.quantity }));
+      patch((tb) => ({
+        items: tb.items.map((i) =>
+          i.stock_id === item.stock_id ? { ...mapLine(line), unit_price: i.unit_price } : i
+        ),
+      }));
+    } catch (err) {
+      toast.error(t(err?.response?.data?.detail || "auth.genericError"));
+    } finally {
+      focusScan();
+    }
+  }
+
+  async function removeItem(item) {
+    patch((tb) => ({ items: tb.items.filter((i) => i.stock_id !== item.stock_id) }));
+    try {
+      await posRelease(tab.holdKey, item.stock_id);
     } catch {
       /* best effort */
     }
@@ -209,7 +247,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
 
   function commitPrice(item, raw) {
     setPriceDraft((d) => {
-      const { [item.variant_id]: _drop, ...rest } = d;
+      const { [item.stock_id]: _drop, ...rest } = d;
       return rest;
     });
     let v = Number(raw);
@@ -220,8 +258,21 @@ export default function CartWorkspace({ tab, boot, patch }) {
     }
     v = Number(v.toFixed(2));
     patch((tb) => ({
-      items: tb.items.map((i) => (i.variant_id === item.variant_id ? { ...i, unit_price: v } : i)),
+      items: tb.items.map((i) => (i.stock_id === item.stock_id ? { ...i, unit_price: v } : i)),
     }));
+  }
+
+  // Is a non-coding value selectable? Only if a sibling stock with that exact
+  // combination exists and has free availability (or it's the current stock).
+  function optionAvailable(item, attrId, valueId) {
+    const target = { ...(item.selected || {}), [String(attrId)]: Number(valueId) };
+    const keys = Object.keys(target);
+    return (item.siblings || []).some((s) => {
+      const a = s.attributes || {};
+      if (Object.keys(a).length !== keys.length) return false;
+      if (!keys.every((k) => Number(a[k]) === Number(target[k]))) return false;
+      return s.available > 0 || s.stock_id === item.stock_id;
+    });
   }
 
   // ---- Wizard nav ----
@@ -244,7 +295,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
           name: tab.customer.name.trim(),
         },
         items: items.map((i) => ({
-          variant_id: i.variant_id,
+          stock_id: i.stock_id,
           quantity: i.quantity,
           unit_price: i.unit_price,
         })),
@@ -348,7 +399,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
                 </div>
               ) : (
                 <div className="max-h-full overflow-y-auto">
-                  <table className="w-full text-sm">
+                  <table className="ctrl-table w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-surface">
                       <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
                         <th className="w-14 px-3 py-2.5" />
@@ -363,11 +414,11 @@ export default function CartWorkspace({ tab, boot, patch }) {
                     <tbody>
                       {items.map((item) => {
                         const label = (isAr ? item.variant_ar : item.variant_en) || "";
-                        const priceVal = priceDraft[item.variant_id] ?? String(item.unit_price);
-                        const qtyVal = qtyDraft[item.variant_id] ?? String(item.quantity);
+                        const priceVal = priceDraft[item.stock_id] ?? String(item.unit_price);
+                        const qtyVal = qtyDraft[item.stock_id] ?? String(item.quantity);
                         const atMax = item.quantity >= item.available;
                         return (
-                          <tr key={item.variant_id} className="border-b border-border/60 last:border-0">
+                          <tr key={item.stock_id} className="border-b border-border/60 last:border-0">
                             <td className="px-3 py-2">
                               <div className="h-10 w-10 overflow-hidden rounded-lg border border-border bg-elevated">
                                 {item.image ? (
@@ -382,7 +433,43 @@ export default function CartWorkspace({ tab, boot, patch }) {
                             <td className="px-3 py-2 font-mono text-xs text-muted">{item.code}</td>
                             <td className="px-3 py-2">
                               <p className="font-medium text-text">{item.name}</p>
+                              {/* Coding attributes are baked into the code — locked. */}
                               {label && <p className="text-xs text-muted">{label}</p>}
+                              {/* Non-coding attributes can be switched to in-stock siblings. */}
+                              {(item.nc_attrs || []).length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                  {item.nc_attrs.map((a) => {
+                                    const cur = item.selected?.[String(a.attr_id)] ?? "";
+                                    const curVal = a.values.find((val) => Number(val.value_id) === Number(cur));
+                                    return (
+                                      <span key={a.attr_id} className="flex items-center gap-1 text-xs">
+                                        <span className="text-muted">
+                                          {isAr ? a.name_ar : a.name_en}:
+                                        </span>
+                                        {a.type === "color" && curVal?.hex && (
+                                          <span className="h-3 w-3 shrink-0 rounded-full border border-border"
+                                            style={{ backgroundColor: curVal.hex }} />
+                                        )}
+                                        <select
+                                          value={cur}
+                                          onChange={(e) => doSwitch(item, a.attr_id, e.target.value)}
+                                          className="ctrl-input-sm ctrl-select h-7 py-0 text-xs"
+                                        >
+                                          {a.values.map((val) => {
+                                            const ok = optionAvailable(item, a.attr_id, val.value_id);
+                                            return (
+                                              <option key={val.value_id} value={val.value_id} disabled={!ok}>
+                                                {(isAr ? val.value_ar : val.value_en) +
+                                                  (ok ? "" : ` — ${t("pos.table.soldOut")}`)}
+                                              </option>
+                                            );
+                                          })}
+                                        </select>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2">
                               <input
@@ -392,7 +479,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
                                 dir="ltr"
                                 value={priceVal}
                                 onChange={(e) =>
-                                  setPriceDraft((d) => ({ ...d, [item.variant_id]: e.target.value }))
+                                  setPriceDraft((d) => ({ ...d, [item.stock_id]: e.target.value }))
                                 }
                                 onBlur={(e) => commitPrice(item, e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && commitPrice(item, e.target.value)}
@@ -414,7 +501,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
                                   dir="ltr"
                                   value={qtyVal}
                                   onChange={(e) =>
-                                    setQtyDraft((d) => ({ ...d, [item.variant_id]: e.target.value }))
+                                    setQtyDraft((d) => ({ ...d, [item.stock_id]: e.target.value }))
                                   }
                                   onBlur={(e) => commitQty(item, Math.trunc(Number(e.target.value) || 0))}
                                   onKeyDown={(e) =>
