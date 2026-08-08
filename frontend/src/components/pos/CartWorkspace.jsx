@@ -5,6 +5,8 @@ import { useBrand } from "@/context/BrandContext";
 import { posScan, posSetQty, posSwitch, posRelease, posCheckout, lookupCustomer } from "@/lib/pos";
 import { mapCartLine } from "@/lib/carts";
 import { mediaUrl } from "@/lib/products";
+import { getPrintTarget, printDocument } from "@/lib/settings";
+import { buildInvoiceHtml } from "@/lib/invoicePrint";
 import {
   IconSearch,
   IconTrash,
@@ -15,6 +17,7 @@ import {
   IconWallet,
   IconDiscount,
   IconImage,
+  IconPrinter,
   IconChevronLeft,
   IconChevronRight,
 } from "@/components/icons";
@@ -58,6 +61,33 @@ function StatCard({ Icon, label, value, tone }) {
       </div>
     </div>
   );
+}
+
+// Map a committed sale (checkout response) into the invoice view/print model.
+function saleToInvoiceModel(sale, isAr) {
+  return {
+    invoice_no: sale.invoice_no,
+    created_at: sale.created_at,
+    customer_name: sale.customer_name,
+    customer_phone: sale.customer_phone,
+    payment_method: isAr ? sale.payment_method_ar : sale.payment_method_en,
+    items: (sale.items || []).map((i) => {
+      const list = i.list_price ?? i.unit_price;
+      return {
+        name: i.name,
+        attributes: i.attributes || [],
+        quantity: i.quantity,
+        unit_price: list,
+        line_total: (list || 0) * (i.quantity || 0),
+      };
+    }),
+    subtotal: sale.subtotal,
+    discount: sale.discount,
+    total: sale.total,
+    paid: sale.paid_amount,
+    changeExact: sale.change_amount,
+    changeRaw: sale.change_raw,
+  };
 }
 
 export default function CartWorkspace({ tab, boot, patch }) {
@@ -380,6 +410,38 @@ export default function CartWorkspace({ tab, boot, patch }) {
     patch({ step: 3 });
   }
 
+  // Auto-print the finished invoice using the profile assigned to "Invoice
+  // Printing". With no assigned profile, the OS default printer/paper is used.
+  async function autoPrintInvoice(sale) {
+    try {
+      const { profile } = await getPrintTarget("invoice").catch(() => ({ profile: null }));
+      const labels = {
+        title: t("pos.invoice.title"),
+        paidBadge: t("pos.invoice.paidBadge"),
+        billTo: t("pos.invoice.billTo"),
+        payment: t("pos.invoice.payment"),
+        item: t("pos.invoice.item"),
+        qty: t("pos.table.qty"),
+        price: t("pos.table.price"),
+        total: t("pos.table.total"),
+        subtotal: t("pos.invoice.subtotal"),
+        discount: t("pos.stats.discount"),
+        totalLabel: t("pos.stats.total"),
+        paid: t("pos.payment.paid"),
+        changeRaw: t("pos.payment.changeRaw"),
+        changeExact: t("pos.payment.changeExact"),
+        thanks: t("pos.invoice.thanks"),
+      };
+      const body = buildInvoiceHtml({
+        inv: saleToInvoiceModel(sale, isAr),
+        brand, isAr, isCash, labels, profile, money, num2,
+      });
+      await printDocument(body);
+    } catch {
+      /* a print failure must not disrupt the completed sale */
+    }
+  }
+
   // Actually create the sale (only from the invoice step, on "Checkout").
   async function doCheckout() {
     if (!items.length) return toast.info(t("pos.cartEmpty"));
@@ -404,10 +466,15 @@ export default function CartWorkspace({ tab, boot, patch }) {
         ...(isCash ? { paid_amount: cash.paid } : {}),
       });
       toast.success(t("pos.invoice.done"));
-      // "Skip invoice" → go straight to a fresh cart (no invoice screen).
-      // Otherwise keep the completed invoice visible for printing / review.
-      if (tab.skipInvoice) newSale();
-      else patch({ sale });
+      // "Skip invoice" → go straight to a fresh cart (no invoice screen, no print).
+      // Otherwise show the completed invoice and print it automatically using the
+      // assigned "Invoice Printing" profile (or the OS default printer).
+      if (tab.skipInvoice) {
+        newSale();
+      } else {
+        patch({ sale });
+        autoPrintInvoice(sale);
+      }
     } catch (err) {
       toast.error(t(err?.response?.data?.detail || "auth.genericError"));
     } finally {
@@ -447,30 +514,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
 
   const committed = !!tab.sale;
   const inv = committed
-    ? {
-        invoice_no: tab.sale.invoice_no,
-        created_at: tab.sale.created_at,
-        customer_name: tab.sale.customer_name,
-        customer_phone: tab.sale.customer_phone,
-        payment_method: isAr ? tab.sale.payment_method_ar : tab.sale.payment_method_en,
-        items: (tab.sale.items || []).map((i) => {
-          // Rows show the catalog (list) price; the discount line bridges to the net.
-          const list = i.list_price ?? i.unit_price;
-          return {
-            name: i.name,
-            attributes: i.attributes || [],
-            quantity: i.quantity,
-            unit_price: list,
-            line_total: (list || 0) * (i.quantity || 0),
-          };
-        }),
-        subtotal: tab.sale.subtotal,
-        discount: tab.sale.discount,
-        total: tab.sale.total,
-        paid: tab.sale.paid_amount,
-        changeExact: tab.sale.change_amount,
-        changeRaw: tab.sale.change_raw,
-      }
+    ? saleToInvoiceModel(tab.sale, isAr)
     : {
         invoice_no: null,
         created_at: new Date().toISOString(),
@@ -1181,13 +1225,10 @@ export default function CartWorkspace({ tab, boot, patch }) {
             {tab.skipInvoice ? (
               <span className="text-sm text-muted">{t("pos.invoice.skipped")}</span>
             ) : (
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="ctrl-btn border border-border px-4 py-2 text-sm text-text hover:bg-elevated"
-              >
-                {t("pos.invoice.print")}
-              </button>
+              <span className="inline-flex items-center gap-1.5 text-sm text-muted">
+                <IconPrinter width={15} height={15} className="text-accent" />
+                {t("pos.invoice.autoPrinted")}
+              </span>
             )}
             <button
               type="button"

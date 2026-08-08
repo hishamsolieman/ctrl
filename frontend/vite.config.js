@@ -9,8 +9,10 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname, "src") },
   },
+  // Tauri expects a fixed dev-server URL (see src-tauri/tauri.conf.json → devUrl).
+  clearScreen: false,
   server: {
     port: 5173,
-    strictPort: false,
+    strictPort: true,
   },
 });

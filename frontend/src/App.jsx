@@ -10,8 +10,14 @@ import Cashier from "@/pages/Cashier";
 import Products from "@/pages/Products";
 import ProductCategories from "@/pages/ProductCategories";
 import ProductAttributes from "@/pages/ProductAttributes";
+import Barcode from "@/pages/Barcode";
 import Suppliers from "@/pages/Suppliers";
 import Customers from "@/pages/Customers";
+import Users from "@/pages/Users";
+import Invoices from "@/pages/Invoices";
+import Logs from "@/pages/Logs";
+import Settings from "@/pages/Settings";
+import Expenses from "@/pages/Expenses";
 import Preloader from "@/components/Preloader";
 
 // Redirect authenticated users away from /login.
@@ -43,8 +49,14 @@ export default function App() {
             <Route path="/products/list" element={<Products />} />
             <Route path="/products/categories" element={<ProductCategories />} />
             <Route path="/products/attributes" element={<ProductAttributes />} />
+            <Route path="/products/barcode" element={<Barcode />} />
             <Route path="/suppliers" element={<Suppliers />} />
             <Route path="/customers" element={<Customers />} />
+            <Route path="/users" element={<Users />} />
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/logs" element={<Logs />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/business/expenses" element={<Expenses />} />
           </Route>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

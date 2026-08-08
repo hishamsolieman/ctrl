@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import (
+    JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -41,6 +43,10 @@ class Sale(Base):
     paid_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     change_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     change_raw: Mapped[float] = mapped_column(Numeric(12, 2), default=0, nullable=False)
+
+    # True when the sale was created manually/back-dated from Invoice management
+    # (as opposed to a live POS checkout).
+    is_backtrack: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

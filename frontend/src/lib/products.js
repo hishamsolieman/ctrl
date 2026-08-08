@@ -222,6 +222,24 @@ export async function getCurrency() {
   return data.currency;
 }
 
+// Flat list of in-stock variants for barcode printing: { items, currency }.
+export async function listBarcodeItems({ q, category_ids } = {}) {
+  const params = {};
+  if (q) params.q = q;
+  if (category_ids) params.category_ids = category_ids;
+  const { data } = await api.get("/products/barcode-items", { params });
+  return data;
+}
+
+// Log a barcode print run (client does the actual printing).
+export async function logBarcodePrint(total, rows) {
+  try {
+    await api.post("/products/barcode-log", { total, rows });
+  } catch {
+    /* logging must never block printing */
+  }
+}
+
 // ---- Attributes ----
 export async function listAttributes() {
   const { data } = await api.get("/attributes");

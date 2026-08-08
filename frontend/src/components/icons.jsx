@@ -260,3 +260,77 @@ export const IconDiscount = (p) => (
     <circle cx="16.5" cy="16.5" r="1.6" />
   </svg>
 );
+
+export const IconSettings = (p) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+
+export const IconBarcode = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 5v14M7 5v14M11 5v14M14 5v14M18 5v14M21 5v14" />
+  </svg>
+);
+
+export const IconRefresh = (p) => (
+  <svg {...base} {...p}>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v6h-6" />
+  </svg>
+);
+
+export const IconPrinter = (p) => (
+  <svg {...base} {...p}>
+    <path d="M6 9V3h12v6" />
+    <path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" />
+    <rect x="6" y="14" width="12" height="7" rx="1" />
+  </svg>
+);
+
+export const IconActivity = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 12h4l3 8 4-16 3 8h4" />
+  </svg>
+);
+
+export const IconReceipt = (p) => (
+  <svg {...base} {...p}>
+    <path d="M5 3v18l2.5-1.5L10 21l2-1.5L14 21l2.5-1.5L19 21V3z" />
+    <line x1="8" y1="8" x2="16" y2="8" />
+    <line x1="8" y1="12" x2="16" y2="12" />
+  </svg>
+);
+
+export const IconKey = (p) => (
+  <svg {...base} {...p}>
+    <circle cx="7.5" cy="15.5" r="4" />
+    <path d="m10.5 12.5 8-8" />
+    <path d="m17 6 2 2" />
+    <path d="m14 9 2 2" />
+  </svg>
+);
+
+export const IconShield = (p) => (
+  <svg {...base} {...p}>
+    <path d="M12 3 5 6v5c0 4 3 7 7 9 4-2 7-5 7-9V6z" />
+  </svg>
+);
+
+export const IconUsers = (p) => (
+  <svg {...base} {...p}>
+    <path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1" />
+    <circle cx="9" cy="7" r="3" />
+    <path d="M22 19v-1a4 4 0 0 0-3-3.87" />
+    <path d="M16 4.13A4 4 0 0 1 16 11" />
+  </svg>
+);
+
+export const IconBriefcase = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="7" width="18" height="13" rx="2" />
+    <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M3 12h18" />
+  </svg>
+);

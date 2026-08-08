@@ -21,6 +21,11 @@ class User(Base):
     # preferred UI language, e.g. "en" | "ar"
     locale: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
 
+    # Optional avatar — references a base64 image in `images`.
+    image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
+
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
     role: Mapped["Role"] = relationship(back_populates="users")  # noqa: F821
 

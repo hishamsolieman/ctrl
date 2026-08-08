@@ -13,6 +13,8 @@ from app.models.customer import Customer
 from app.models.payment_method import PaymentMethod
 from app.models.sale import Sale, SaleItem
 from app.models.sale_hold import SaleHold
+from app.models.print_profile import PrintProfile
+from app.models.expense import Expense
 
 __all__ = [
     "Role",
@@ -35,4 +37,6 @@ __all__ = [
     "Sale",
     "SaleItem",
     "SaleHold",
+    "PrintProfile",
+    "Expense",
 ]

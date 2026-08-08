@@ -13,11 +13,16 @@ from app.api.routes import (
     catalog,
     categories,
     customers,
+    expenses,
     images,
+    invoices,
+    logs,
     meta,
     pos,
     products,
+    settings as settings_routes,
     suppliers,
+    users,
 )
 from app.core.config import settings
 
@@ -45,11 +50,16 @@ app.include_router(auth.router)
 app.include_router(catalog.router)
 app.include_router(suppliers.router)
 app.include_router(customers.router)
+app.include_router(users.router)
+app.include_router(invoices.router)
+app.include_router(logs.router)
 app.include_router(categories.router)
 app.include_router(images.router)
 app.include_router(attributes.router)
 app.include_router(products.router)
 app.include_router(pos.router)
+app.include_router(settings_routes.router)
+app.include_router(expenses.router)
 
 
 @app.get("/")

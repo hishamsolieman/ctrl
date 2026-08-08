@@ -340,6 +340,78 @@ def list_products(
     }
 
 
+@router.get("/barcode-items")
+def barcode_items(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+    q: str | None = Query(None),
+    category_ids: str | None = Query(None),
+):
+    """Flat list of in-stock variants for barcode label printing.
+
+    One row per live variant that has on-hand quantity > 0. Each row carries the
+    product name, the variant `code` (the barcode value), the current price, and
+    the available quantity (the default print count).
+    """
+    rows = (
+        db.query(Product)
+        .options(selectinload(Product.variants).selectinload(ProductVariant.stocks))
+        .filter(Product.is_deleted.is_(False))
+        .all()
+    )
+    if category_ids:
+        ids = {int(x) for x in category_ids.split(",") if x.strip().isdigit()}
+        if ids:
+            rows = [p for p in rows if p.category_id in ids]
+    if q:
+        rows = [p for p in rows if _matches_search(p, q)]
+
+    items: list[dict[str, Any]] = []
+    for p in rows:
+        for v in _live_variants(p):
+            qty = _variant_qty(v)
+            if qty <= 0:
+                continue
+            items.append(
+                {
+                    "product_id": p.id,
+                    "product_name": p.name,
+                    "variant_id": v.id,
+                    "code": v.code,
+                    "price": float(p.price or 0),
+                    "min_price": float(p.min_price or 0),
+                    "quantity": qty,
+                    "attributes": {**(p.attributes or {}), **(v.attributes or {})},
+                }
+            )
+    items.sort(key=lambda it: ((it["product_name"] or "").lower(), it["code"]))
+    return {"items": items, "currency": get_currency(db)}
+
+
+class BarcodePrintLog(BaseModel):
+    total: int = 0
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/barcode-log")
+def barcode_print_log(
+    payload: BarcodePrintLog,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+):
+    """Record a barcode-label print run (client performs the actual printing)."""
+    log_action(
+        db,
+        action="barcode.print",
+        user_id=actor.id,
+        entity="product",
+        details={"total": payload.total, "rows": payload.rows[:200]},
+        request=request,
+    )
+    return {"ok": True}
+
+
 @router.get("/check-name")
 def check_product_name(
     name: str = Query(...),

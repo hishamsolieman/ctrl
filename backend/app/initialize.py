@@ -177,6 +177,19 @@ def patch_schema() -> None:
                     f"ADD COLUMN `{col}` DECIMAL(12,2) NOT NULL DEFAULT 0"
                 )
 
+        # sales.is_backtrack — flags manual/back-dated invoices (vs POS sales).
+        if not _has_col("sales", "is_backtrack"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `sales` "
+                "ADD COLUMN `is_backtrack` TINYINT(1) NOT NULL DEFAULT 0"
+            )
+
+        # users.image_id — optional avatar (base64 image in `images`).
+        if not _has_col("users", "image_id"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `users` ADD COLUMN `image_id` INT NULL AFTER `locale`"
+            )
+
         # Drop legacy sales snapshot columns — customer + payment are read via FK.
         for col in ("customer_name", "customer_phone", "payment_method"):
             if _has_col("sales", col):

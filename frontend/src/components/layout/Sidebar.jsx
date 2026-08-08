@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/context/AuthContext";
 import brand from "@/config/brand";
 import {
   IconDashboard,
@@ -11,9 +12,17 @@ import {
   IconTruck,
   IconCart,
   IconUser,
+  IconUsers,
+  IconReceipt,
+  IconActivity,
+  IconSettings,
+  IconBarcode,
+  IconBriefcase,
+  IconWallet,
   IconChevronDown,
 } from "@/components/icons";
 
+// `minLevel` (when set) hides the item from users below that privilege level.
 const NAV = [
   { to: "/dashboard", key: "nav.dashboard", Icon: IconDashboard },
   { to: "/pos", key: "nav.pos", Icon: IconCart },
@@ -24,10 +33,22 @@ const NAV = [
       { to: "/products/list", key: "nav.productList", Icon: IconList },
       { to: "/products/categories", key: "nav.productCategories", Icon: IconTag },
       { to: "/products/attributes", key: "nav.productAttributes", Icon: IconSliders },
+      { to: "/products/barcode", key: "nav.productBarcode", Icon: IconBarcode },
     ],
   },
   { to: "/suppliers", key: "nav.suppliers", Icon: IconTruck },
   { to: "/customers", key: "nav.customers", Icon: IconUser },
+  {
+    key: "nav.business",
+    Icon: IconBriefcase,
+    children: [
+      { to: "/business/expenses", key: "nav.expenses", Icon: IconWallet },
+    ],
+  },
+  { to: "/invoices", key: "nav.invoices", Icon: IconReceipt, minLevel: 20 },
+  { to: "/users", key: "nav.users", Icon: IconUsers, minLevel: 20 },
+  { to: "/logs", key: "nav.logs", Icon: IconActivity, minLevel: 40 },
+  { to: "/settings", key: "nav.settings", Icon: IconSettings, minLevel: 30 },
 ];
 
 const linkBase =
@@ -35,6 +56,9 @@ const linkBase =
 
 export default function Sidebar({ collapsed, mobileOpen, onClose, onToggleCollapse }) {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
+  const level = user?.role_level ?? 0;
+  const nav = NAV.filter((item) => item.minLevel == null || level >= item.minLevel);
   const isRtl = i18n.dir() === "rtl";
   const { pathname } = useLocation();
   const chevronRotated = collapsed !== isRtl;
@@ -120,7 +144,7 @@ export default function Sidebar({ collapsed, mobileOpen, onClose, onToggleCollap
             </p>
           )}
 
-          {NAV.map((item) => {
+          {nav.map((item) => {
             if (!item.children) return leafLink(item);
 
             // Collapsed: render children as icon-only links (parent has no route).
