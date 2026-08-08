@@ -13,7 +13,10 @@ from app.api.routes import (
     catalog,
     categories,
     customers,
+    dashboard,
     expenses,
+    funds,
+    reports,
     images,
     invoices,
     logs,
@@ -60,6 +63,9 @@ app.include_router(products.router)
 app.include_router(pos.router)
 app.include_router(settings_routes.router)
 app.include_router(expenses.router)
+app.include_router(dashboard.router)
+app.include_router(funds.router)
+app.include_router(reports.router)
 
 
 @app.get("/")

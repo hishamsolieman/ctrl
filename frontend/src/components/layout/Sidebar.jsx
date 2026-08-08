@@ -6,6 +6,8 @@ import brand from "@/config/brand";
 import {
   IconDashboard,
   IconBox,
+  IconGrid,
+  IconTrendUp,
   IconList,
   IconTag,
   IconSliders,
@@ -18,13 +20,21 @@ import {
   IconSettings,
   IconBarcode,
   IconBriefcase,
+  IconCoins,
   IconWallet,
   IconChevronDown,
 } from "@/components/icons";
 
 // `minLevel` (when set) hides the item from users below that privilege level.
 const NAV = [
-  { to: "/dashboard", key: "nav.dashboard", Icon: IconDashboard },
+  {
+    key: "nav.dashboard",
+    Icon: IconDashboard,
+    children: [
+      { to: "/dashboard", key: "nav.dashboardOverview", Icon: IconGrid, end: true },
+      { to: "/dashboard/today", key: "nav.todaySales", Icon: IconTrendUp },
+    ],
+  },
   { to: "/pos", key: "nav.pos", Icon: IconCart },
   {
     key: "nav.products",
@@ -43,6 +53,7 @@ const NAV = [
     Icon: IconBriefcase,
     children: [
       { to: "/business/expenses", key: "nav.expenses", Icon: IconWallet },
+      { to: "/business/funds", key: "nav.funds", Icon: IconCoins, minLevel: 30 },
     ],
   },
   { to: "/invoices", key: "nav.invoices", Icon: IconReceipt, minLevel: 20 },
@@ -58,7 +69,14 @@ export default function Sidebar({ collapsed, mobileOpen, onClose, onToggleCollap
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const level = user?.role_level ?? 0;
-  const nav = NAV.filter((item) => item.minLevel == null || level >= item.minLevel);
+  // Hide items above the user's privilege level, children included; a group with
+  // nothing left to show disappears entirely.
+  const allowed = (item) => item.minLevel == null || level >= item.minLevel;
+  const nav = NAV.filter(allowed)
+    .map((item) =>
+      item.children ? { ...item, children: item.children.filter(allowed) } : item
+    )
+    .filter((item) => !item.children || item.children.length > 0);
   const isRtl = i18n.dir() === "rtl";
   const { pathname } = useLocation();
   const chevronRotated = collapsed !== isRtl;
@@ -144,13 +162,16 @@ export default function Sidebar({ collapsed, mobileOpen, onClose, onToggleCollap
             </p>
           )}
 
-          {nav.map((item) => {
+          {nav.map((item, index) => {
             if (!item.children) return leafLink(item);
 
             // Collapsed: render children as icon-only links (parent has no route).
             if (collapsed) {
               return (
-                <div key={item.key} className="space-y-1 border-t border-border pt-1">
+                <div
+                  key={item.key}
+                  className={`space-y-1 ${index > 0 ? "border-t border-border pt-1" : ""}`}
+                >
                   {item.children.map((c) => leafLink(c))}
                 </div>
               );

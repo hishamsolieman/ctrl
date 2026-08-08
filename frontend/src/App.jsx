@@ -6,6 +6,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
+import TodaySales from "@/pages/TodaySales";
 import Cashier from "@/pages/Cashier";
 import Products from "@/pages/Products";
 import ProductCategories from "@/pages/ProductCategories";
@@ -18,6 +19,7 @@ import Invoices from "@/pages/Invoices";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
 import Expenses from "@/pages/Expenses";
+import Funds from "@/pages/Funds";
 import Preloader from "@/components/Preloader";
 
 // Redirect authenticated users away from /login.
@@ -44,6 +46,7 @@ export default function App() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard/today" element={<TodaySales />} />
             <Route path="/pos" element={<Cashier />} />
             <Route path="/products" element={<Navigate to="/products/list" replace />} />
             <Route path="/products/list" element={<Products />} />
@@ -57,6 +60,7 @@ export default function App() {
             <Route path="/logs" element={<Logs />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/business/expenses" element={<Expenses />} />
+            <Route path="/business/funds" element={<Funds />} />
           </Route>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

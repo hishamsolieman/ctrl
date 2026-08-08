@@ -327,10 +327,76 @@ export const IconUsers = (p) => (
   </svg>
 );
 
+export const IconDrawer = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="9" width="18" height="11" rx="2" />
+    <path d="M6 9V6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v3" />
+    <path d="M10 14h4" />
+  </svg>
+);
+
+export const IconClock = (p) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3.5 2" />
+  </svg>
+);
+
+export const IconCoins = (p) => (
+  <svg {...base} {...p}>
+    <ellipse cx="9" cy="6.5" rx="6" ry="2.8" />
+    <path d="M3 6.5v4c0 1.55 2.69 2.8 6 2.8s6-1.25 6-2.8v-4" />
+    <path d="M15 10.9c3.09.14 6 1.35 6 2.85v4c0 1.55-2.69 2.8-6 2.8-2.5 0-4.65-.71-5.56-1.72" />
+    <path d="M3 14.5c0 1.55 2.69 2.8 6 2.8h.5" />
+  </svg>
+);
+
+export const IconScale = (p) => (
+  <svg {...base} {...p}>
+    <path d="M12 4v16" />
+    <path d="M7 20h10" />
+    <path d="M4 8h16" />
+    <path d="M4 8l-2 5a3 3 0 0 0 6 0z" />
+    <path d="M20 8l2 5a3 3 0 0 1-6 0z" />
+  </svg>
+);
+
 export const IconBriefcase = (p) => (
   <svg {...base} {...p}>
     <rect x="3" y="7" width="18" height="13" rx="2" />
     <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     <path d="M3 12h18" />
+  </svg>
+);
+
+export const IconCalendar = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 10h18M8 3v4M16 3v4" />
+  </svg>
+);
+
+export const IconFileText = (p) => (
+  <svg {...base} {...p}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 3v5h5" />
+    <path d="M9 13h6M9 17h4" />
+  </svg>
+);
+
+export const IconChart = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 21h18" />
+    <rect x="5" y="11" width="3.5" height="7" rx="1" />
+    <rect x="10.25" y="7" width="3.5" height="11" rx="1" />
+    <rect x="15.5" y="13" width="3.5" height="5" rx="1" />
+  </svg>
+);
+
+export const IconLayers = (p) => (
+  <svg {...base} {...p}>
+    <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+    <path d="m3 13 9 5 9-5" />
+    <path d="m3 17.5 9 5 9-5" />
   </svg>
 );

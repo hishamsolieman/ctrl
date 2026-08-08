@@ -41,11 +41,15 @@ class Settings:
 
     # NOTE: Auth/JWT configuration is embedded in app.core.security (not .env).
 
-    # --- CORS --------------------------------------------------------------
+    # --- CORS (Vite development + Tauri desktop origins) ------------------
     CORS_ORIGINS: list[str] = [
         o.strip()
         for o in os.environ.get(
-            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+            "CORS_ORIGINS",
+            (
+                "http://localhost:5173,http://127.0.0.1:5173,"
+                "http://tauri.localhost,https://tauri.localhost,tauri://localhost"
+            ),
         ).split(",")
         if o.strip()
     ]
