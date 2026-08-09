@@ -46,17 +46,17 @@ const NAV = [
       { to: "/products/barcode", key: "nav.productBarcode", Icon: IconBarcode },
     ],
   },
-  { to: "/suppliers", key: "nav.suppliers", Icon: IconTruck },
-  { to: "/customers", key: "nav.customers", Icon: IconUser },
   {
     key: "nav.business",
     Icon: IconBriefcase,
     children: [
+      { to: "/suppliers", key: "nav.suppliers", Icon: IconTruck },
+      { to: "/customers", key: "nav.customers", Icon: IconUser },
+      { to: "/invoices", key: "nav.invoices", Icon: IconReceipt, minLevel: 20 },
       { to: "/business/expenses", key: "nav.expenses", Icon: IconWallet },
       { to: "/business/funds", key: "nav.funds", Icon: IconCoins, minLevel: 30 },
     ],
   },
-  { to: "/invoices", key: "nav.invoices", Icon: IconReceipt, minLevel: 20 },
   { to: "/users", key: "nav.users", Icon: IconUsers, minLevel: 20 },
   { to: "/logs", key: "nav.logs", Icon: IconActivity, minLevel: 40 },
   { to: "/settings", key: "nav.settings", Icon: IconSettings, minLevel: 30 },
@@ -167,10 +167,14 @@ export default function Sidebar({ collapsed, mobileOpen, onClose, onToggleCollap
 
             // Collapsed: render children as icon-only links (parent has no route).
             if (collapsed) {
+              // After Business, a hard divider separates it from Users / Logs / Settings.
+              const afterBusiness = item.key === "nav.business";
               return (
                 <div
                   key={item.key}
-                  className={`space-y-1 ${index > 0 ? "border-t border-border pt-1" : ""}`}
+                  className={`space-y-1 ${index > 0 ? "border-t border-border pt-1" : ""} ${
+                    afterBusiness ? "mb-1 border-b border-border pb-1" : ""
+                  }`}
                 >
                   {item.children.map((c) => leafLink(c))}
                 </div>

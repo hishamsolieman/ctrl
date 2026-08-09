@@ -36,6 +36,7 @@ def _user_out(user: User) -> UserOut:
         role_level=user.role.level if user.role else 0,
         locale=user.locale,
         must_reset_password=bool(user.must_reset_password),
+        image_url=f"/images/{user.image_id}" if user.image_id else None,
     )
 
 

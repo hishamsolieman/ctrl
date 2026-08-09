@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     role_level: int
     locale: str
     must_reset_password: bool = False
+    image_url: str | None = None
 
     class Config:
         from_attributes = True

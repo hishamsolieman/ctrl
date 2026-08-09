@@ -189,13 +189,25 @@ input[type="date"] {
   color-scheme: dark;
 }
 
-/* Subtle dotted grid backdrop used on auth screen */
+/* Subtle dotted grid backdrop (login + post-login shell).
+   Color + image live in one rule so Tailwind `bg-*` cannot wipe the dots. */
 .ctrl-grid-bg {
+  background-color: rgb(var(--ctrl-bg));
   background-image: radial-gradient(
     rgba(142, 255, 25, 0.08) 1px,
     transparent 1px
   );
   background-size: 22px 22px;
+}
+
+/* Soft top wash — same cue as the login page; without it the dots vanish on
+   pure black, especially in the narrow gutters between app cards. */
+.ctrl-grid-glow {
+  background-image: radial-gradient(
+    ellipse at top,
+    rgba(142, 255, 25, 0.1),
+    transparent 60%
+  );
 }
 
 /* -------------------------------------------------------------------------- */

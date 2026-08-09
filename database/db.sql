@@ -1991,8 +1991,8 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
 
 -- Business Management / Expenses ---------------------------------------------
 INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
-  ('ui', 'nav.business', 'en', 'Business Management'),
-  ('ui', 'nav.business', 'ar', 'إدارة الأعمال'),
+  ('ui', 'nav.business', 'en', 'Business'),
+  ('ui', 'nav.business', 'ar', 'الأعمال'),
   ('ui', 'nav.expenses', 'en', 'Expenses'),
   ('ui', 'nav.expenses', 'ar', 'المصروفات'),
   ('ui', 'expenses.title', 'en', 'Expenses'),
@@ -2885,3 +2885,9 @@ UPDATE `translations` SET `value` = 'لن يتم عرض كلمة السر هذه
   WHERE `namespace` = 'ui' AND `key` = 'users.cred.warning' AND `locale` = 'ar';
 UPDATE `translations` SET `value` = 'يجب أن تكون كلمة السر 8 أحرف على الأقل.'
   WHERE `namespace` = 'ui' AND `key` = 'users.errors.passwordShort' AND `locale` = 'ar';
+
+-- Nav: "Business Management" → "Business"
+UPDATE `translations` SET `value` = 'Business'
+  WHERE `namespace` = 'ui' AND `key` = 'nav.business' AND `locale` = 'en';
+UPDATE `translations` SET `value` = 'الأعمال'
+  WHERE `namespace` = 'ui' AND `key` = 'nav.business' AND `locale` = 'ar';

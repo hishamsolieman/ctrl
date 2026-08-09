@@ -3,7 +3,39 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { LANGUAGES } from "@/i18n";
-import { IconUser, IconLogout } from "@/components/icons";
+import { mediaUrl } from "@/lib/products";
+import { IconLogout } from "@/components/icons";
+
+// "John Doe" → "JD". One word → first two letters. Falls back to the username.
+function initialsOf(fullName, username) {
+  const parts = String(fullName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  const u = String(username || "").trim();
+  return (u.slice(0, 2) || "?").toUpperCase();
+}
+
+function Avatar({ user }) {
+  const src = user?.image_url ? mediaUrl(user.image_url) : "";
+  if (src) {
+    return (
+      <span className="flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-border bg-elevated">
+        <img src={src} alt="" className="h-full w-full object-cover" />
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[11px] font-bold tracking-wide text-accent">
+      {initialsOf(user?.full_name, user?.username)}
+    </span>
+  );
+}
 
 // Clickable user chip that opens a dropdown with language selection + logout.
 export default function UserMenu() {
@@ -52,9 +84,7 @@ export default function UserMenu() {
             : "border-border bg-elevated hover:border-accent"
         }`}
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15 text-accent">
-          <IconUser width={18} height={18} />
-        </span>
+        <Avatar user={user} />
         <span className="hidden text-start leading-tight sm:block">
           <span className="block text-xs font-semibold text-text">
             {user?.username}
@@ -81,11 +111,14 @@ export default function UserMenu() {
       {open && (
         <div className="absolute end-0 mt-2 w-60 origin-top overflow-hidden rounded-xl border border-border bg-surface shadow-2xl animate-fade-in">
           {/* Header */}
-          <div className="border-b border-border px-4 py-3">
-            <p className="text-sm font-semibold text-text">{user?.username}</p>
-            <p className="text-[11px] uppercase tracking-wide text-accent">
-              {user?.role}
-            </p>
+          <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+            <Avatar user={user} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-text">{user?.username}</p>
+              <p className="text-[11px] uppercase tracking-wide text-accent">
+                {user?.role}
+              </p>
+            </div>
           </div>
 
           {/* Language selection */}
