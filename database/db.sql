@@ -1758,7 +1758,19 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'invoices.backtrackTag', 'en', 'Backtrack'),
   ('ui', 'invoices.backtrackTag', 'ar', 'فاتورة سابقة'),
   ('ui', 'invoices.backtrackNote', 'en', 'This invoice was created manually.'),
-  ('ui', 'invoices.backtrackNote', 'ar', 'تم إنشاء هذه الفاتورة يدويًا.');
+  ('ui', 'invoices.backtrackNote', 'ar', 'تم إنشاء هذه الفاتورة يدويًا.'),
+  ('ui', 'invoices.export', 'en', 'Export'),
+  ('ui', 'invoices.export', 'ar', 'تصدير'),
+  ('ui', 'invoices.showAll', 'en', 'Show all'),
+  ('ui', 'invoices.showAll', 'ar', 'إظهار الكل'),
+  ('ui', 'invoices.hideAll', 'en', 'Hide all'),
+  ('ui', 'invoices.hideAll', 'ar', 'إخفاء الكل'),
+  ('ui', 'invoices.reveal', 'en', 'Show value'),
+  ('ui', 'invoices.reveal', 'ar', 'إظهار القيمة'),
+  ('ui', 'invoices.hideValue', 'en', 'Hide value'),
+  ('ui', 'invoices.hideValue', 'ar', 'إخفاء القيمة'),
+  ('ui', 'invoices.resetDates', 'en', 'Clear dates'),
+  ('ui', 'invoices.resetDates', 'ar', 'مسح التواريخ');
 
 -- Logs / activity browser ---------------------------------------------------
 INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES

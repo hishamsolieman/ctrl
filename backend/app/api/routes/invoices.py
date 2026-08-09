@@ -14,15 +14,19 @@ after totals, per-line changes and the exact stock movements.
 """
 from __future__ import annotations
 
+import csv
+import io
+import json
 from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, require_role
+from app.api.deps import require_role
 from app.core.database import get_db
 from app.models.customer import Customer
 from app.models.payment_method import PaymentMethod
@@ -220,22 +224,26 @@ def _load_sale(db: Session, sale_id: int) -> Sale | None:
     )
 
 
-# --------------------------------------------------------------------------- #
-# Read
-# --------------------------------------------------------------------------- #
-@router.get("")
-def list_invoices(
-    search: str = Query("", max_length=120),
-    by: str = Query("invoice"),   # "invoice" | "item"
-    date_from: str | None = Query(None),
-    date_to: str | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(8, ge=1, le=PAGE_SIZE_MAX),
-    db: Session = Depends(get_db),
-    _u: User = Depends(require_role("Moderator")),
+def _customer_log(sale: Sale) -> dict:
+    c = sale.customer
+    return {
+        "id": c.id if c else None,
+        "name": c.name if c else None,
+        "phone": c.phone if c else None,
+    }
+
+
+def _filtered_sales_query(
+    db: Session,
+    *,
+    search: str = "",
+    by: str = "invoice",
+    date_from: str | None = None,
+    date_to: str | None = None,
 ):
+    """Shared list/export filter matching the invoices page search bar."""
     q = db.query(Sale).outerjoin(Customer, Sale.customer_id == Customer.id)
-    s = search.strip()
+    s = (search or "").strip()
     if s:
         like = f"%{s}%"
         if by == "item":
@@ -261,7 +269,26 @@ def list_invoices(
             q = q.filter(Sale.created_at <= datetime.fromisoformat(date_to))
         except ValueError:
             pass
+    return q
 
+
+# --------------------------------------------------------------------------- #
+# Read
+# --------------------------------------------------------------------------- #
+@router.get("")
+def list_invoices(
+    search: str = Query("", max_length=120),
+    by: str = Query("invoice"),   # "invoice" | "item"
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=PAGE_SIZE_MAX),
+    db: Session = Depends(get_db),
+    _u: User = Depends(require_role("Moderator")),
+):
+    q = _filtered_sales_query(
+        db, search=search, by=by, date_from=date_from, date_to=date_to
+    )
     total = q.count()
     rows = (
         q.options(selectinload(Sale.items))
@@ -278,6 +305,94 @@ def list_invoices(
         "page_size": page_size,
         "pages": max(1, (total + page_size - 1) // page_size),
     }
+
+
+@router.get("/export/csv")
+def export_invoices(
+    search: str = Query("", max_length=120),
+    by: str = Query("invoice"),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """CSV of every invoice matching the current filters (all pages).
+
+    Includes seller, customer JSON, totals, and line items as JSON.
+    """
+    q = _filtered_sales_query(
+        db, search=search, by=by, date_from=date_from, date_to=date_to
+    )
+    rows = (
+        q.options(selectinload(Sale.items))
+        .order_by(Sale.created_at.desc(), Sale.id.desc())
+        .all()
+    )
+    names = _seller_names(db, rows)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(
+        [
+            "invoice_no",
+            "created_at",
+            "is_backtrack",
+            "seller",
+            "customer",
+            "payment_en",
+            "payment_ar",
+            "item_count",
+            "subtotal",
+            "discount",
+            "total",
+            "items",
+        ]
+    )
+    for sale in rows:
+        serialized = _serialize(sale, names.get(sale.user_id))
+        w.writerow(
+            [
+                sale.invoice_no,
+                serialized["created_at"] or "",
+                1 if sale.is_backtrack else 0,
+                serialized["seller"] or "",
+                json.dumps(
+                    {
+                        "id": serialized["customer_id"],
+                        "name": serialized["customer_name"],
+                        "phone": serialized["customer_phone"],
+                    },
+                    ensure_ascii=False,
+                ),
+                serialized["payment_method_en"] or "",
+                serialized["payment_method_ar"] or "",
+                serialized["item_count"],
+                serialized["subtotal"],
+                serialized["discount"],
+                serialized["total"],
+                json.dumps(serialized["items"], ensure_ascii=False),
+            ]
+        )
+
+    log_action(
+        db,
+        action="invoice.export",
+        user_id=user.id,
+        details={
+            "count": len(rows),
+            "search": search.strip() or None,
+            "by": by,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
+        request=request,
+    )
+    return StreamingResponse(
+        iter([buf.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=invoices.csv"},
+    )
 
 
 def _bucket(db: Session, since: datetime | None) -> dict:
@@ -314,20 +429,31 @@ def stock_search(
     db: Session = Depends(get_db),
     _u: User = Depends(require_role("Moderator")),
 ):
-    """In-stock sellable units for the 'select from inventory' picker."""
+    """Search in-stock sellable units for the invoice picker.
+
+    Requires a search term so we never scan the full inventory (which may be
+    huge). Only rows with ``on_hand > 0`` are returned.
+    """
+    s = q.strip()
+    if not s:
+        return []
+    like = f"%{s}%"
     query = (
         db.query(VariantStock)
         .join(ProductVariant, VariantStock.variant_id == ProductVariant.id)
         .join(Product, ProductVariant.product_id == Product.id)
-        .filter(Product.is_deleted.is_(False), ProductVariant.is_deleted.is_(False))
+        .filter(
+            Product.is_deleted.is_(False),
+            ProductVariant.is_deleted.is_(False),
+            VariantStock.quantity > 0,
+            or_(
+                Product.name.ilike(like),
+                Product.code.ilike(like),
+                ProductVariant.code.ilike(like),
+            ),
+        )
         .options(*_VARIANT_LOAD)
     )
-    s = q.strip()
-    if s:
-        like = f"%{s}%"
-        query = query.filter(
-            or_(Product.name.ilike(like), Product.code.ilike(like), ProductVariant.code.ilike(like))
-        )
     rows = query.order_by(func.lower(Product.name), VariantStock.id).limit(limit).all()
     out = []
     for st in rows:
@@ -437,15 +563,32 @@ def create_invoice(
     db.refresh(sale)
 
     log_action(
-        db, action="invoice.create", user_id=actor.id, entity="sale", entity_id=sale.id,
+        db,
+        action="invoice.backtrack",
+        user_id=actor.id,
+        entity="sale",
+        entity_id=sale.id,
         details={
             "invoice_no": sale.invoice_no,
             "is_backtrack": True,
+            "created_at": sale.created_at.isoformat() if sale.created_at else None,
             "backdated": payload.created_at.isoformat() if payload.created_at else None,
-            "customer": {"id": customer.id if customer else None,
-                         "name": customer.name if customer else None,
-                         "phone": customer.phone if customer else None},
-            "payment_method_id": sale.payment_method_id,
+            "seller": {
+                "id": actor.id,
+                "username": actor.username,
+                "full_name": actor.full_name,
+            },
+            "customer": {
+                "id": customer.id if customer else None,
+                "name": customer.name if customer else None,
+                "phone": customer.phone if customer else None,
+            },
+            "payment": {
+                "id": payment.id if payment else None,
+                "name_en": payment.name_en if payment else None,
+                "name_ar": payment.name_ar if payment else None,
+            },
+            "items": [_item_log(i) for i in sale.items],
             "items_added": added_log,
             "stock_movements": {str(sid): -need for sid, need in demand.items()},
             "totals": _totals_log(sale),
@@ -582,16 +725,36 @@ def update_invoice(
     db.commit()
     db.refresh(sale)
 
+    payment = db.get(PaymentMethod, sale.payment_method_id) if sale.payment_method_id else None
     log_action(
-        db, action="invoice.update", user_id=actor.id, entity="sale", entity_id=sale.id,
+        db,
+        action="invoice.update",
+        user_id=actor.id,
+        entity="sale",
+        entity_id=sale.id,
         details={
             "invoice_no": sale.invoice_no,
+            "is_backtrack": bool(sale.is_backtrack),
+            "editor": {
+                "id": actor.id,
+                "username": actor.username,
+                "full_name": actor.full_name,
+            },
+            "customer": _customer_log(sale),
+            "payment": {
+                "id": payment.id if payment else None,
+                "name_en": payment.name_en if payment else None,
+                "name_ar": payment.name_ar if payment else None,
+            },
             "before": before,
-            "after": {"totals": _totals_log(sale)},
+            "after": {
+                "totals": _totals_log(sale),
+                "items": [_item_log(i) for i in sale.items],
+            },
             "items_added": added_log,
             "items_removed": removed_log,
             "items_updated": updated_log,
-            "stock_movements": {str(sid): d for sid, d in stock_delta.items()},
+            "stock_movements": {str(sid): d for sid, d in stock_delta.items() if d},
         },
         request=request,
     )

@@ -19,8 +19,8 @@ function fromSaleItem(i) {
     code: i.code,
     name: i.name,
     image: null,
-    quantity: i.quantity,
-    unit_price: Number(i.unit_price || 0),
+    quantity: String(i.quantity ?? 1),
+    unit_price: Number(i.unit_price || 0).toFixed(2),
     list_price: Number(i.list_price || i.unit_price || 0),
     min_price: Number(i.min_price || 0),
     on_hand: null, // unknown for already-recorded lines; server validates
@@ -36,8 +36,8 @@ function fromStock(s) {
     code: s.code,
     name: s.label_en ? `${s.name} · ${s.label_en}` : s.name,
     image: s.image,
-    quantity: 1,
-    unit_price: Number(s.price || 0),
+    quantity: "1",
+    unit_price: Number(s.price || 0).toFixed(2),
     list_price: Number(s.price || 0),
     min_price: Number(s.min_price || 0),
     on_hand: Number(s.on_hand || 0),
@@ -77,14 +77,21 @@ export default function InvoiceModal({ open, mode, initial, boot, onClose, onSav
     setResults([]);
   }, [open, isEdit, initial, boot]);
 
-  // Debounced inventory search.
+  // Debounced inventory search — only runs when the user types a query so we
+  // never pull the full catalog. Backend returns in-stock rows only.
   useEffect(() => {
     if (!open) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
+    const term = pq.trim();
+    if (!term) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
     searchTimer.current = setTimeout(async () => {
       setSearching(true);
       try {
-        setResults(await searchStock(pq));
+        setResults(await searchStock(term));
       } catch {
         setResults([]);
       } finally {
@@ -121,7 +128,9 @@ export default function InvoiceModal({ open, mode, initial, boot, onClose, onSav
       const existing = prev.find((l) => l.stock_id === s.stock_id);
       if (existing) {
         return prev.map((l) =>
-          l.stock_id === s.stock_id ? { ...l, quantity: Number(l.quantity || 0) + 1 } : l
+          l.stock_id === s.stock_id
+            ? { ...l, quantity: String(Number(l.quantity || 0) + 1) }
+            : l
         );
       }
       return [...prev, fromStock(s)];
@@ -132,11 +141,33 @@ export default function InvoiceModal({ open, mode, initial, boot, onClose, onSav
     setItems((prev) => prev.map((l) => (l.key === k ? { ...l, ...patch } : l)));
   const removeLine = (k) => setItems((prev) => prev.filter((l) => l.key !== k));
 
+  function onQtyChange(k, raw) {
+    const cleaned = String(raw).replace(/\D/g, "");
+    setLine(k, { quantity: cleaned });
+  }
+
+  function onPriceChange(k, raw) {
+    let cleaned = String(raw).replace(/[^\d.]/g, "");
+    const dot = cleaned.indexOf(".");
+    if (dot !== -1) {
+      cleaned = cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
+      const [whole, frac = ""] = cleaned.split(".");
+      cleaned = `${whole}.${frac.slice(0, 2)}`;
+    }
+    setLine(k, { unit_price: cleaned });
+  }
+
   function clampPrice(l) {
     let u = Number(l.unit_price || 0);
+    if (!Number.isFinite(u) || u < 0) u = 0;
     if (l.list_price && u > l.list_price) u = l.list_price;
     if (u < l.min_price) u = l.min_price;
-    setLine(l.key, { unit_price: Math.round(u * 100) / 100 });
+    setLine(l.key, { unit_price: (Math.round(u * 100) / 100).toFixed(2) });
+  }
+
+  function clampQty(l) {
+    const q = Math.max(1, Math.floor(Number(l.quantity) || 1));
+    setLine(l.key, { quantity: String(q) });
   }
 
   async function onPhoneBlur() {
@@ -280,7 +311,7 @@ export default function InvoiceModal({ open, mode, initial, boot, onClose, onSav
               onChange={(e) => setPq(e.target.value)}
               placeholder={t("invoices.modal.searchStock")} />
           </div>
-          {(pq || results.length > 0) && (
+          {pq.trim() && (
             <div className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-border">
               {searching ? (
                 <div className="p-3 text-center text-sm text-muted">{t("invoices.modal.searching")}</div>
@@ -341,16 +372,25 @@ export default function InvoiceModal({ open, mode, initial, boot, onClose, onSav
                       <p className="font-mono text-[11px] text-muted" dir="ltr">{l.code}</p>
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <input type="number" min={1} value={l.quantity}
-                        onChange={(e) => setLine(l.key, { quantity: e.target.value })}
-                        onBlur={(e) => setLine(l.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-                        className="ctrl-input-sm w-16 text-center text-sm" />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={l.quantity}
+                        onChange={(e) => onQtyChange(l.key, e.target.value)}
+                        onBlur={() => clampQty(l)}
+                        className="ctrl-input-sm w-16 text-center text-sm"
+                      />
                     </td>
                     <td className="px-3 py-2 text-end">
-                      <input type="number" step="0.01" min={0} value={l.unit_price}
-                        onChange={(e) => setLine(l.key, { unit_price: e.target.value })}
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={l.unit_price}
+                        onChange={(e) => onPriceChange(l.key, e.target.value)}
                         onBlur={() => clampPrice(l)}
-                        className="ctrl-input-sm w-24 text-end text-sm" dir="ltr" />
+                        className="ctrl-input-sm w-24 text-end text-sm"
+                        dir="ltr"
+                      />
                     </td>
                     <td className="px-3 py-2 text-end font-medium text-text tabular-nums">
                       {money(Number(l.unit_price || 0) * Number(l.quantity || 0))}

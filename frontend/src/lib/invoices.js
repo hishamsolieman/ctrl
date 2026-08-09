@@ -17,10 +17,28 @@ export async function getInvoice(id) {
   return data;
 }
 
-// Search sellable stock units for the "select from inventory" picker.
+/** Search in-stock units for the invoice picker (requires a non-empty query). */
 export async function searchStock(q) {
-  const { data } = await api.get("/invoices/stock/search", { params: { q } });
+  const term = (q || "").trim();
+  if (!term) return [];
+  const { data } = await api.get("/invoices/stock/search", { params: { q: term } });
   return data;
+}
+
+/** Download invoices.csv for the current filters (all matching pages). */
+export async function exportInvoices(params = {}) {
+  const res = await api.get("/invoices/export/csv", {
+    responseType: "blob",
+    params,
+  });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "invoices.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Back-dated / manual invoice (Admin+). Adding items deducts inventory.
