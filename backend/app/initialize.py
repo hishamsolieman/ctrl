@@ -68,6 +68,32 @@ def patch_schema() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE `suppliers` ADD COLUMN `address` TEXT NULL AFTER `email`"
             )
+
+        # suppliers.is_active → is_deleted (polarity flip: active=1 becomes deleted=0).
+        has_is_active = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'suppliers' "
+                "AND COLUMN_NAME = 'is_active'"
+            ),
+            {"db": settings.DB_NAME},
+        ).scalar()
+        has_is_deleted = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'suppliers' "
+                "AND COLUMN_NAME = 'is_deleted'"
+            ),
+            {"db": settings.DB_NAME},
+        ).scalar()
+        if has_is_active and not has_is_deleted:
+            conn.exec_driver_sql(
+                "ALTER TABLE `suppliers` "
+                "CHANGE COLUMN `is_active` `is_deleted` TINYINT(1) NOT NULL DEFAULT 0"
+            )
+            conn.exec_driver_sql(
+                "UPDATE `suppliers` SET `is_deleted` = 1 - `is_deleted`"
+            )
         # suppliers.created_at — used for month-over-month "new suppliers" trend.
         has_sup_created = conn.execute(
             text(

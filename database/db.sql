@@ -90,13 +90,13 @@ CREATE TABLE IF NOT EXISTS `categories` (
 
 -- Suppliers -------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `suppliers` (
-  `id`        INT AUTO_INCREMENT PRIMARY KEY,
-  `name`      VARCHAR(180) NOT NULL,
-  `phone`     VARCHAR(60)  NULL,
-  `email`      VARCHAR(180) NULL,
-  `address`    TEXT         NULL,
-  `is_active`  TINYINT(1)   NOT NULL DEFAULT 1,
-  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `name`       VARCHAR(180) NOT NULL,
+  `phone`      VARCHAR(60)  NULL,
+  `email`       VARCHAR(180) NULL,
+  `address`     TEXT         NULL,
+  `is_deleted`  TINYINT(1)   NOT NULL DEFAULT 0,
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Supplier invoices -----------------------------------------------------------
@@ -335,9 +335,9 @@ INSERT IGNORE INTO `categories` (`id`, `name_en`, `name_ar`, `is_active`) VALUES
   (3, 'Pants',   'بنطلون',  1);
 
 -- Suppliers -------------------------------------------------------------------
-INSERT IGNORE INTO `suppliers` (`id`, `name`, `phone`, `email`, `address`, `is_active`) VALUES
-  (1, 'Default Supplier', NULL, NULL, 'Cairo, Egypt', 1),
-  (2, 'Cairo Textiles',   NULL, NULL, '15 El-Moez St, Cairo, Egypt', 1);
+INSERT IGNORE INTO `suppliers` (`id`, `name`, `phone`, `email`, `address`, `is_deleted`) VALUES
+  (1, 'Default Supplier', NULL, NULL, 'Cairo, Egypt', 0),
+  (2, 'Cairo Textiles',   NULL, NULL, '15 El-Moez St, Cairo, Egypt', 0);
 
 -- Attribute definitions (Color, Size) + bilingual values ----------------------
 -- Color opts into `coding` (per code unit); Size is non-global + non-coding, so
@@ -1152,6 +1152,24 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'suppliers.stats.top', 'ar', 'المورّد الأبرز'),
   ('ui', 'suppliers.stats.none', 'en', '—'),
   ('ui', 'suppliers.stats.none', 'ar', '—'),
+  ('ui', 'suppliers.showAll', 'en', 'Show all'),
+  ('ui', 'suppliers.showAll', 'ar', 'إظهار الكل'),
+  ('ui', 'suppliers.hideAll', 'en', 'Hide all'),
+  ('ui', 'suppliers.hideAll', 'ar', 'إخفاء الكل'),
+  ('ui', 'suppliers.reveal', 'en', 'Show value'),
+  ('ui', 'suppliers.reveal', 'ar', 'إظهار القيمة'),
+  ('ui', 'suppliers.hide', 'en', 'Hide value'),
+  ('ui', 'suppliers.hide', 'ar', 'إخفاء القيمة'),
+  ('ui', 'suppliers.show', 'en', 'Show'),
+  ('ui', 'suppliers.show', 'ar', 'إظهار'),
+  ('ui', 'suppliers.export', 'en', 'Export'),
+  ('ui', 'suppliers.export', 'ar', 'تصدير'),
+  ('ui', 'suppliers.import', 'en', 'Import'),
+  ('ui', 'suppliers.import', 'ar', 'استيراد'),
+  ('ui', 'suppliers.importDone', 'en', 'Imported {{count}} suppliers.'),
+  ('ui', 'suppliers.importDone', 'ar', 'تم استيراد {{count}} مورّد.'),
+  ('ui', 'suppliers.importDoneUpdated', 'en', 'Imported {{created}} new, updated {{updated}} existing.'),
+  ('ui', 'suppliers.importDoneUpdated', 'ar', 'تم استيراد {{created}} جديد وتحديث {{updated}} موجود.'),
   ('ui', 'suppliers.modal.addTitle', 'en', 'Add Supplier'),
   ('ui', 'suppliers.modal.addTitle', 'ar', 'إضافة مورّد'),
   ('ui', 'suppliers.modal.editTitle', 'en', 'Edit Supplier'),

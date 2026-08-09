@@ -202,6 +202,30 @@ export async function deleteSupplier(id) {
   return data;
 }
 
+export async function exportSuppliers(q) {
+  const res = await api.get("/suppliers/export/csv", {
+    responseType: "blob",
+    params: q ? { q } : undefined,
+  });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "suppliers.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function importSuppliers(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/suppliers/import/csv", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
 export async function listSupplierInvoices(id) {
   const { data } = await api.get(`/suppliers/${id}/invoices`);
   return data;

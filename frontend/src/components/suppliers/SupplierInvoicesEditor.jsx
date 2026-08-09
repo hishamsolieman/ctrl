@@ -35,6 +35,22 @@ export default function SupplierInvoicesEditor({ invoices, onAdd, onDelete, curr
   const setD = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
   const inputCls = "ctrl-input-sm w-full text-sm";
 
+  // Plain text fields (no spinner steppers): qty = digits only; amount = money.
+  function onQtyChange(raw) {
+    const cleaned = String(raw).replace(/\D/g, "");
+    setD("quantity", cleaned);
+  }
+  function onAmountChange(raw) {
+    let cleaned = String(raw).replace(/[^\d.]/g, "");
+    const dot = cleaned.indexOf(".");
+    if (dot !== -1) {
+      cleaned = cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
+      const [whole, frac = ""] = cleaned.split(".");
+      cleaned = `${whole}.${frac.slice(0, 2)}`;
+    }
+    setD("amount", cleaned);
+  }
+
   async function onFile(e) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -92,12 +108,24 @@ export default function SupplierInvoicesEditor({ invoices, onAdd, onDelete, curr
       <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-border bg-elevated/40 p-3 sm:grid-cols-[1fr_5rem_7rem_9rem_auto_auto]">
         <input className={inputCls} placeholder={t("suppliers.invoices.name")}
           value={draft.name} onChange={(e) => setD("name", e.target.value)} />
-        <input type="number" min="0" step="1" className={inputCls}
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          className={inputCls}
           placeholder={t("suppliers.invoices.quantity")}
-          value={draft.quantity} onChange={(e) => setD("quantity", e.target.value)} />
-        <input type="number" min="0" step="0.01" className={inputCls}
+          value={draft.quantity}
+          onChange={(e) => onQtyChange(e.target.value)}
+        />
+        <input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          className={inputCls}
           placeholder={t("suppliers.invoices.amount")}
-          value={draft.amount} onChange={(e) => setD("amount", e.target.value)} />
+          value={draft.amount}
+          onChange={(e) => onAmountChange(e.target.value)}
+        />
         <input type="date" className={inputCls} title={t("suppliers.invoices.date")}
           value={draft.invoice_date} onChange={(e) => setD("invoice_date", e.target.value)} />
         {draft.image_url ? (
@@ -146,7 +174,9 @@ export default function SupplierInvoicesEditor({ invoices, onAdd, onDelete, curr
             ) : (
               invoices.map((inv) => (
                 <tr key={inv.id ?? inv._tmp} className="border-b border-border/60 last:border-0">
-                  <td className="px-3 py-2 font-medium text-text">{inv.name}</td>
+                  <td className="max-w-[12rem] px-3 py-2 font-medium text-text">
+                    <span className="block truncate" title={inv.name}>{inv.name}</span>
+                  </td>
                   <td className="px-3 py-2 text-center text-muted">{inv.quantity}</td>
                   <td className="px-3 py-2 text-text">{money(inv.amount)}</td>
                   <td className="px-3 py-2 text-muted" dir="ltr">{inv.invoice_date || "—"}</td>
