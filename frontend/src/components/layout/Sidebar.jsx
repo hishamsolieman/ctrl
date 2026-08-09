@@ -50,8 +50,8 @@ const NAV = [
     key: "nav.business",
     Icon: IconBriefcase,
     children: [
-      { to: "/suppliers", key: "nav.suppliers", Icon: IconTruck },
-      { to: "/customers", key: "nav.customers", Icon: IconUser },
+      { to: "/suppliers", key: "nav.suppliers", Icon: IconTruck, minLevel: 20 },
+      { to: "/customers", key: "nav.customers", Icon: IconUser, minLevel: 20 },
       { to: "/invoices", key: "nav.invoices", Icon: IconReceipt, minLevel: 20 },
       { to: "/business/expenses", key: "nav.expenses", Icon: IconWallet },
       { to: "/business/funds", key: "nav.funds", Icon: IconCoins, minLevel: 30 },

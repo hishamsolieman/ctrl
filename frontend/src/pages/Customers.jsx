@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
   listCustomers,
   getCustomerStats,
   listCustomerSales,
   updateCustomer,
+  exportCustomers,
 } from "@/lib/customers";
+import StatCard, { MASK } from "@/components/StatCard";
 import {
   IconUser,
   IconWallet,
@@ -15,50 +19,28 @@ import {
   IconSearch,
   IconPhone,
   IconEdit,
-  IconCheck,
   IconTrendUp,
   IconTrendDown,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconDownload,
+  IconEye,
+  IconEyeOff,
 } from "@/components/icons";
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 10;
+const MODERATOR_LEVEL = 20;
+const SECRETS = ["total", "orders", "revenue", "top"];
+const HIDDEN = Object.fromEntries(SECRETS.map((k) => [k, false]));
 
-const TONES = {
-  emerald: { grad: "from-emerald-500/15 via-emerald-500/5", tile: "bg-emerald-500/20 text-emerald-300", glow: "bg-emerald-500/20" },
-  amber: { grad: "from-amber-500/15 via-amber-500/5", tile: "bg-amber-500/20 text-amber-300", glow: "bg-amber-500/20" },
-  sky: { grad: "from-sky-500/15 via-sky-500/5", tile: "bg-sky-500/20 text-sky-300", glow: "bg-sky-500/20" },
-  violet: { grad: "from-violet-500/15 via-violet-500/5", tile: "bg-violet-500/20 text-violet-300", glow: "bg-violet-500/20" },
-};
-
-function StatCard({ Icon, label, value, sub, foot, tone = "emerald" }) {
-  const c = TONES[tone] || TONES.emerald;
-  return (
-    <div className={`ctrl-card relative overflow-hidden bg-gradient-to-br ${c.grad} to-transparent p-5`}>
-      <span className={`pointer-events-none absolute -start-8 -top-10 h-24 w-24 rounded-full ${c.glow} blur-2xl`} />
-      <div className="relative flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs uppercase tracking-widest text-muted">{label}</p>
-          <p className="mt-2 truncate text-2xl font-bold text-text">{value}</p>
-          {sub && <p className="mt-1 truncate text-xs text-muted">{sub}</p>}
-        </div>
-        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${c.tile}`}>
-          <Icon width={22} height={22} />
-        </span>
-      </div>
-      {foot && <div className="relative mt-3 border-t border-border/60 pt-2">{foot}</div>}
-    </div>
-  );
-}
-
-function TrendBadge({ trend, phrase, format }) {
+function TrendBadge({ trend, phrase, format, revealed }) {
   if (!trend) return null;
   const up = trend.dir === "up";
   const down = trend.dir === "down";
   const color = up ? "text-emerald-400" : down ? "text-red-400" : "text-muted";
   const Arrow = up ? IconTrendUp : down ? IconTrendDown : null;
-  const shown = format ? format(trend.month) : trend.month;
+  const shown = revealed ? (format ? format(trend.month) : trend.month) : MASK;
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <span className={`inline-flex items-center gap-1 font-semibold ${color}`}>
@@ -70,27 +52,53 @@ function TrendBadge({ trend, phrase, format }) {
   );
 }
 
+function ColReveal({ label, shown, onToggle, showTitle, hideTitle }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {label}
+      <button
+        type="button"
+        onClick={onToggle}
+        title={shown ? hideTitle : showTitle}
+        className="text-muted transition hover:text-text"
+      >
+        {shown ? <IconEyeOff width={15} height={15} /> : <IconEye width={15} height={15} />}
+      </button>
+    </span>
+  );
+}
+
 export default function Customers() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const { user, loading: authLoading } = useAuth();
   const toast = useToast();
+  const canAccess = !!user && (user.role_level ?? 0) >= MODERATOR_LEVEL;
 
   const [items, setItems] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [shown, setShown] = useState(HIDDEN);
+  const [showPhone, setShowPhone] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
+  const [showSpent, setShowSpent] = useState(false);
 
   // Lazily-loaded per-customer sales; open accordions tracked by id.
-  const [expanded, setExpanded] = useState(() => new Set()); // customer ids
-  const [salesById, setSalesById] = useState({}); // id -> { loading, data }
-  const [openInvoices, setOpenInvoices] = useState(() => new Set()); // sale ids
-  const [editing, setEditing] = useState(null); // customer being renamed
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [salesById, setSalesById] = useState({});
+  const [openInvoices, setOpenInvoices] = useState(() => new Set());
+  const [editing, setEditing] = useState(null);
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setShown(HIDDEN);
+    setShowPhone(false);
+    setShowOrders(false);
+    setShowSpent(false);
     try {
       const [rows, s] = await Promise.all([listCustomers(), getCustomerStats()]);
       setItems(rows);
@@ -103,8 +111,8 @@ export default function Customers() {
   }, [t, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (canAccess) load();
+  }, [canAccess, load]);
 
   const money = useCallback(
     (n) => {
@@ -115,6 +123,11 @@ export default function Customers() {
       return `${value} ${stats?.currency || ""}`.trim();
     },
     [isAr, stats]
+  );
+
+  const num = useCallback(
+    (n) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US"),
+    [isAr]
   );
 
   const fmtDate = useCallback(
@@ -156,6 +169,26 @@ export default function Customers() {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
+  const allShown = SECRETS.every((k) => shown[k]);
+  const toggle = (k) => setShown((s) => ({ ...s, [k]: !s[k] }));
+  const toggleAll = () =>
+    setShown(Object.fromEntries(SECRETS.map((k) => [k, !allShown])));
+  const revealProps = (key) => ({
+    secret: true,
+    revealed: shown[key],
+    onToggleSecret: () => toggle(key),
+    revealLabel: t("customers.reveal"),
+    hideLabel: t("customers.hide"),
+  });
+
+  async function onExport() {
+    try {
+      await exportCustomers(q.trim() || undefined);
+    } catch {
+      toast.error(t("auth.genericError"));
+    }
+  }
+
   async function toggleExpand(c) {
     setExpanded((prev) => {
       const n = new Set(prev);
@@ -163,7 +196,6 @@ export default function Customers() {
       else n.add(c.id);
       return n;
     });
-    // Fetch this customer's invoices the first time they're opened.
     if (!expanded.has(c.id) && !salesById[c.id]) {
       setSalesById((m) => ({ ...m, [c.id]: { loading: true, data: [] } }));
       try {
@@ -209,8 +241,13 @@ export default function Customers() {
 
   const iconBtn =
     "flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text transition hover:border-accent hover:text-accent";
-
+  const toolbarBtn = "ctrl-btn border border-border px-3 py-2 text-sm text-text hover:bg-elevated";
   const COLS = 7;
+  const showLbl = t("customers.show");
+  const hideLbl = t("customers.hide");
+
+  if (authLoading) return null;
+  if (!canAccess) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -220,22 +257,76 @@ export default function Customers() {
           <h1 className="text-xl font-bold text-text">{t("customers.title")}</h1>
           <p className="text-sm text-muted">{t("customers.subtitle")}</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={onExport} className={toolbarBtn}>
+            <IconDownload width={16} height={16} /> {t("customers.export")}
+          </button>
+          <button type="button" onClick={toggleAll} className={toolbarBtn}>
+            {allShown ? <IconEyeOff width={16} height={16} /> : <IconEye width={16} height={16} />}
+            {allShown ? t("customers.hideAll") : t("customers.showAll")}
+          </button>
+        </div>
       </div>
 
-      {/* Stats cards */}
+      {/* Stats cards — every value starts masked */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard tone="emerald" Icon={IconUser} label={t("customers.stats.total")}
-          value={stats?.total ?? "—"}
-          foot={<TrendBadge trend={stats?.totalTrend} phrase={t("customers.stats.newThisMonth")} />} />
-        <StatCard tone="sky" Icon={IconList} label={t("customers.stats.orders")}
-          value={stats?.orders ?? "—"}
-          foot={<TrendBadge trend={stats?.ordersTrend} phrase={t("customers.stats.ordersThisMonth")} />} />
-        <StatCard tone="amber" Icon={IconWallet} label={t("customers.stats.revenue")}
+        <StatCard
+          tone="emerald"
+          Icon={IconUser}
+          label={t("customers.stats.total")}
+          value={stats != null ? num(stats.total) : "—"}
+          foot={
+            <TrendBadge
+              trend={stats?.totalTrend}
+              phrase={t("customers.stats.newThisMonth")}
+              revealed={shown.total}
+            />
+          }
+          {...revealProps("total")}
+        />
+        <StatCard
+          tone="sky"
+          Icon={IconList}
+          label={t("customers.stats.orders")}
+          value={stats != null ? num(stats.orders) : "—"}
+          foot={
+            <TrendBadge
+              trend={stats?.ordersTrend}
+              phrase={t("customers.stats.ordersThisMonth")}
+              revealed={shown.orders}
+            />
+          }
+          {...revealProps("orders")}
+        />
+        <StatCard
+          tone="amber"
+          Icon={IconWallet}
+          label={t("customers.stats.revenue")}
           value={stats ? money(stats.revenue) : "—"}
-          foot={<TrendBadge trend={stats?.revenueTrend} phrase={t("customers.stats.revenueThisMonth")} format={money} />} />
-        <StatCard tone="violet" Icon={IconCart} label={t("customers.stats.top")}
+          foot={
+            <TrendBadge
+              trend={stats?.revenueTrend}
+              phrase={t("customers.stats.revenueThisMonth")}
+              format={money}
+              revealed={shown.revenue}
+            />
+          }
+          {...revealProps("revenue")}
+        />
+        <StatCard
+          tone="violet"
+          Icon={IconCart}
+          label={t("customers.stats.top")}
           value={stats?.top ? stats.top.name : t("customers.stats.none")}
-          sub={stats?.top ? money(stats.top.spent) : ""} />
+          foot={
+            stats?.top ? (
+              <span className="font-semibold text-text">
+                {shown.top ? money(stats.top.spent) : MASK}
+              </span>
+            ) : null
+          }
+          {...revealProps("top")}
+        />
       </div>
 
       {/* Search */}
@@ -243,8 +334,12 @@ export default function Customers() {
         <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-muted">
           <IconSearch width={18} height={18} />
         </span>
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder={t("customers.search")} className="ctrl-input py-2.5 ps-10" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={t("customers.search")}
+          className="ctrl-input py-2.5 ps-10"
+        />
       </div>
 
       {/* Table */}
@@ -273,9 +368,33 @@ export default function Customers() {
                 <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
                   <th className="w-10 px-2 py-3" />
                   <th className="px-4 py-3 text-start font-medium">{t("customers.table.name")}</th>
-                  <th className="px-4 py-3 text-start font-medium">{t("customers.table.phone")}</th>
-                  <th className="px-4 py-3 text-center font-medium">{t("customers.table.orders")}</th>
-                  <th className="px-4 py-3 text-end font-medium">{t("customers.table.spent")}</th>
+                  <th className="px-4 py-3 text-start font-medium">
+                    <ColReveal
+                      label={t("customers.table.phone")}
+                      shown={showPhone}
+                      onToggle={() => setShowPhone((v) => !v)}
+                      showTitle={showLbl}
+                      hideTitle={hideLbl}
+                    />
+                  </th>
+                  <th className="px-4 py-3 text-center font-medium">
+                    <ColReveal
+                      label={t("customers.table.orders")}
+                      shown={showOrders}
+                      onToggle={() => setShowOrders((v) => !v)}
+                      showTitle={showLbl}
+                      hideTitle={hideLbl}
+                    />
+                  </th>
+                  <th className="px-4 py-3 text-end font-medium">
+                    <ColReveal
+                      label={t("customers.table.spent")}
+                      shown={showSpent}
+                      onToggle={() => setShowSpent((v) => !v)}
+                      showTitle={showLbl}
+                      hideTitle={hideLbl}
+                    />
+                  </th>
                   <th className="px-4 py-3 text-start font-medium">{t("customers.table.lastOrder")}</th>
                   <th className="px-4 py-3 text-end font-medium">{t("customers.table.actions")}</th>
                 </tr>
@@ -292,6 +411,9 @@ export default function Customers() {
                       isOpen={isOpen}
                       sales={sales}
                       openInvoices={openInvoices}
+                      showPhone={showPhone}
+                      showOrders={showOrders}
+                      showSpent={showSpent}
                       onToggleExpand={() => toggleExpand(c)}
                       onToggleInvoice={toggleInvoice}
                       onEdit={() => openEdit(c)}
@@ -308,17 +430,24 @@ export default function Customers() {
           )}
         </div>
 
-        {/* Pagination */}
         {!loading && filtered.length > 0 && pageCount > 1 && (
           <div className="flex items-center justify-between border-t border-border px-4 py-3">
-            <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="ctrl-btn border border-border px-3 py-1.5 text-sm text-text hover:bg-elevated disabled:opacity-40">
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="ctrl-btn border border-border px-3 py-1.5 text-sm text-text hover:bg-elevated disabled:opacity-40"
+            >
               {isAr ? <IconChevronRight width={16} height={16} /> : <IconChevronLeft width={16} height={16} />}
               {t("products.pagination.prev")}
             </button>
-            <span className="text-sm text-muted">{t("products.pagination.pageOf", { page, pages: pageCount })}</span>
-            <button disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-              className="ctrl-btn border border-border px-3 py-1.5 text-sm text-text hover:bg-elevated disabled:opacity-40">
+            <span className="text-sm text-muted">
+              {t("products.pagination.pageOf", { page, pages: pageCount })}
+            </span>
+            <button
+              disabled={page >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              className="ctrl-btn border border-border px-3 py-1.5 text-sm text-text hover:bg-elevated disabled:opacity-40"
+            >
               {t("products.pagination.next")}
               {isAr ? <IconChevronLeft width={16} height={16} /> : <IconChevronRight width={16} height={16} />}
             </button>
@@ -326,14 +455,17 @@ export default function Customers() {
         )}
       </div>
 
-      {/* Edit name modal */}
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => !saving && setEditing(null)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !saving && setEditing(null)}
+        >
           <div className="ctrl-card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-text">{t("customers.editTitle")}</h3>
             {editing.phone && (
-              <p className="mt-1 text-sm text-muted" dir="ltr">{editing.phone}</p>
+              <p className="mt-1 text-sm text-muted" dir="ltr">
+                {editing.phone}
+              </p>
             )}
             <label className="mt-4 block text-xs font-medium uppercase tracking-wide text-muted">
               {t("customers.table.name")}
@@ -346,12 +478,18 @@ export default function Customers() {
               className="ctrl-input mt-1.5 py-2.5"
             />
             <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setEditing(null)} disabled={saving}
-                className="ctrl-btn border border-border px-4 py-2 text-sm text-text hover:bg-elevated disabled:opacity-50">
+              <button
+                onClick={() => setEditing(null)}
+                disabled={saving}
+                className="ctrl-btn border border-border px-4 py-2 text-sm text-text hover:bg-elevated disabled:opacity-50"
+              >
                 {t("customers.cancel")}
               </button>
-              <button onClick={saveEdit} disabled={saving}
-                className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95 disabled:opacity-50">
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95 disabled:opacity-50"
+              >
                 {t("customers.save")}
               </button>
             </div>
@@ -362,10 +500,23 @@ export default function Customers() {
   );
 }
 
-// A customer row plus (when open) a full-width panel listing their invoices.
 function FragmentRow({
-  c, cols, isOpen, sales, openInvoices, onToggleExpand, onToggleInvoice,
-  onEdit, money, fmtDate, isAr, t, iconBtn,
+  c,
+  cols,
+  isOpen,
+  sales,
+  openInvoices,
+  showPhone,
+  showOrders,
+  showSpent,
+  onToggleExpand,
+  onToggleInvoice,
+  onEdit,
+  money,
+  fmtDate,
+  isAr,
+  t,
+  iconBtn,
 }) {
   return (
     <>
@@ -379,23 +530,39 @@ function FragmentRow({
             title={t("customers.viewOrders")}
             className="mx-auto flex h-7 w-7 items-center justify-center rounded-lg text-muted transition hover:bg-elevated hover:text-text"
           >
-            <IconChevronDown width={16} height={16} className={`transition-transform ${isOpen ? "rotate-180" : ""}`} />
+            <IconChevronDown
+              width={16}
+              height={16}
+              className={`transition-transform ${isOpen ? "rotate-180" : ""}`}
+            />
           </button>
         </td>
-        <td className="cursor-pointer px-4 py-3 font-medium text-text" onClick={onToggleExpand}>{c.name}</td>
+        <td className="cursor-pointer px-4 py-3 font-medium text-text" onClick={onToggleExpand}>
+          {c.name}
+        </td>
         <td className="px-4 py-3 text-muted">
-          {c.phone ? (
+          {!showPhone ? (
+            MASK
+          ) : c.phone ? (
             <span className="inline-flex items-center gap-1.5" dir="ltr">
               <IconPhone width={14} height={14} className="text-muted" /> {c.phone}
             </span>
-          ) : "—"}
+          ) : (
+            "—"
+          )}
         </td>
         <td className="px-4 py-3 text-center">
-          <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
-            {c.orders}
-          </span>
+          {showOrders ? (
+            <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
+              {c.orders}
+            </span>
+          ) : (
+            MASK
+          )}
         </td>
-        <td className="px-4 py-3 text-end font-medium text-text">{money(c.spent)}</td>
+        <td className="px-4 py-3 text-end font-medium text-text tabular-nums">
+          {showSpent ? money(c.spent) : MASK}
+        </td>
         <td className="px-4 py-3 text-muted">{c.last_order_at ? fmtDate(c.last_order_at) : "—"}</td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-2">
@@ -440,7 +607,6 @@ function FragmentRow({
   );
 }
 
-// A single collapsible invoice: header summary + (when open) line items & totals.
 function InvoiceCard({ sale, open, onToggle, money, fmtDate, isAr, t }) {
   const payment = isAr ? sale.payment_method_ar : sale.payment_method_en;
   return (
@@ -450,7 +616,11 @@ function InvoiceCard({ sale, open, onToggle, money, fmtDate, isAr, t }) {
         onClick={onToggle}
         className="flex w-full items-center gap-3 px-4 py-3 text-start transition hover:bg-elevated/40"
       >
-        <IconChevronDown width={16} height={16} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+        <IconChevronDown
+          width={16}
+          height={16}
+          className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
+        />
         <span className="font-mono text-xs font-semibold text-accent">{sale.invoice_no}</span>
         <span className="text-xs text-muted">{fmtDate(sale.created_at)}</span>
         <span className="ms-auto flex items-center gap-3">
@@ -480,9 +650,15 @@ function InvoiceCard({ sale, open, onToggle, money, fmtDate, isAr, t }) {
                       {(it.attributes || []).length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1.5">
                           {it.attributes.map((a, i) => (
-                            <span key={i} className="inline-flex items-center gap-1 rounded-full bg-elevated px-2 py-0.5 text-[11px] text-muted">
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1 rounded-full bg-elevated px-2 py-0.5 text-[11px] text-muted"
+                            >
                               {a.hex && (
-                                <span className="h-2.5 w-2.5 rounded-full border border-border" style={{ backgroundColor: a.hex }} />
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full border border-border"
+                                  style={{ backgroundColor: a.hex }}
+                                />
                               )}
                               {isAr ? a.value_ar : a.value_en}
                             </span>
@@ -501,7 +677,6 @@ function InvoiceCard({ sale, open, onToggle, money, fmtDate, isAr, t }) {
             </table>
           </div>
 
-          {/* Totals */}
           <div className="mt-3 ms-auto w-full max-w-xs space-y-1 text-sm">
             <div className="flex justify-between text-muted">
               <span>{t("customers.invoice.subtotal")}</span>

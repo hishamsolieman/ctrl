@@ -23,3 +23,19 @@ export async function updateCustomer(id, name) {
   const { data } = await api.patch(`/customers/${id}`, { name });
   return data;
 }
+
+/** Download customers.csv for the current search (all matching pages). */
+export async function exportCustomers(q) {
+  const res = await api.get("/customers/export/csv", {
+    responseType: "blob",
+    params: q ? { q } : undefined,
+  });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "customers.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

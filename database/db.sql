@@ -1464,7 +1464,19 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'customers.invoice.total', 'en', 'Total'),
   ('ui', 'customers.invoice.total', 'ar', 'الإجمالي'),
   ('ui', 'customers.invoice.paid', 'en', 'Amount paid'),
-  ('ui', 'customers.invoice.paid', 'ar', 'المبلغ المدفوع');
+  ('ui', 'customers.invoice.paid', 'ar', 'المبلغ المدفوع'),
+  ('ui', 'customers.export', 'en', 'Export'),
+  ('ui', 'customers.export', 'ar', 'تصدير'),
+  ('ui', 'customers.showAll', 'en', 'Show all'),
+  ('ui', 'customers.showAll', 'ar', 'إظهار الكل'),
+  ('ui', 'customers.hideAll', 'en', 'Hide all'),
+  ('ui', 'customers.hideAll', 'ar', 'إخفاء الكل'),
+  ('ui', 'customers.reveal', 'en', 'Show value'),
+  ('ui', 'customers.reveal', 'ar', 'إظهار القيمة'),
+  ('ui', 'customers.hide', 'en', 'Hide value'),
+  ('ui', 'customers.hide', 'ar', 'إخفاء القيمة'),
+  ('ui', 'customers.show', 'en', 'Show'),
+  ('ui', 'customers.show', 'ar', 'إظهار');
 
 -- Users / access management -------------------------------------------------
 INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES

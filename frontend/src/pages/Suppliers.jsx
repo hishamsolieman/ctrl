@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
   listSuppliers,
@@ -36,6 +38,7 @@ import {
 } from "@/components/icons";
 
 const PAGE_SIZE = 10;
+const MODERATOR_LEVEL = 20;
 const SECRETS = ["total", "spend", "products", "top"];
 const HIDDEN = Object.fromEntries(SECRETS.map((k) => [k, false]));
 
@@ -71,7 +74,9 @@ function CellText({ children, className = "" }) {
 export default function Suppliers() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const { user, loading: authLoading } = useAuth();
   const toast = useToast();
+  const canAccess = !!user && (user.role_level ?? 0) >= MODERATOR_LEVEL;
 
   const [items, setItems] = useState([]);
   const [stats, setStats] = useState(null);
@@ -103,8 +108,8 @@ export default function Suppliers() {
   }, [t, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (canAccess) load();
+  }, [canAccess, load]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -210,6 +215,9 @@ export default function Suppliers() {
     revealLabel: t("suppliers.reveal"),
     hideLabel: t("suppliers.hide"),
   });
+
+  if (authLoading) return null;
+  if (!canAccess) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">

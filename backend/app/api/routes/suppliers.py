@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import get_current_user, require_role
+from app.api.deps import require_role
 from app.core.database import get_db
 from app.models.image import Image
 from app.models.product import Product, ProductVariant, VariantStock
@@ -305,14 +305,14 @@ def _replace_invoices(db: Session, supplier: Supplier, invoices: list[dict]) -> 
 # Read
 # --------------------------------------------------------------------------- #
 @router.get("")
-def list_suppliers(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
+def list_suppliers(db: Session = Depends(get_db), _u: User = Depends(require_role("Moderator"))):
     units, _ = _units_and_spend(db)
     rows = _live(db.query(Supplier)).order_by(func.lower(Supplier.name)).all()
     return [_serialize(s, units) for s in rows]
 
 
 @router.get("/stats")
-def supplier_stats(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
+def supplier_stats(db: Session = Depends(get_db), _u: User = Depends(require_role("Moderator"))):
     """Headline numbers + month-over-month trends for the page's stat cards.
 
     Paid / products use on-hand stock: every live variant's stock quantity, valued
@@ -493,7 +493,7 @@ async def import_suppliers(
 def get_supplier(
     supplier_id: int,
     db: Session = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    _u: User = Depends(require_role("Moderator")),
 ):
     s = _get_live_or_404(db, supplier_id)
     units, _ = _units_and_spend(db)
@@ -621,7 +621,7 @@ def _serialize_invoice(inv: SupplierInvoice) -> dict:
 def list_invoices(
     supplier_id: int,
     db: Session = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    _u: User = Depends(require_role("Moderator")),
 ):
     _get_live_or_404(db, supplier_id)
     rows = (

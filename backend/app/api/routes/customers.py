@@ -7,14 +7,18 @@ be edited — customers are never deleted from here.
 """
 from __future__ import annotations
 
+import csv
+import io
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, require_role
+from app.api.deps import require_role
 from app.core.database import get_db
 from app.models.customer import Customer
 from app.models.sale import Sale
@@ -125,14 +129,14 @@ def _serialize_sale(sale: Sale) -> dict:
 # Read
 # --------------------------------------------------------------------------- #
 @router.get("")
-def list_customers(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
+def list_customers(db: Session = Depends(get_db), _u: User = Depends(require_role("Moderator"))):
     agg = _aggregates(db)
     rows = db.query(Customer).order_by(func.lower(Customer.name)).all()
     return [_serialize(c, agg) for c in rows]
 
 
 @router.get("/stats")
-def customer_stats(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
+def customer_stats(db: Session = Depends(get_db), _u: User = Depends(require_role("Moderator"))):
     start_this, start_last = _month_bounds()
     agg = _aggregates(db)
     customers = db.query(Customer).all()
@@ -182,11 +186,77 @@ def customer_stats(db: Session = Depends(get_db), _u: User = Depends(get_current
     }
 
 
+@router.get("/export/csv")
+def export_customers(
+    q: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("Moderator")),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """CSV of customers matching the on-screen search (all pages).
+
+    Columns: name, phone, orders, spent, last_order_at, invoices (JSON array of
+    each customer's sales including line items).
+    """
+    query = db.query(Customer)
+    term = (q or "").strip()
+    if term:
+        like = f"%{term}%"
+        query = query.filter(
+            or_(Customer.name.ilike(like), Customer.phone.ilike(like))
+        )
+    customers = query.order_by(func.lower(Customer.name)).all()
+    agg = _aggregates(db)
+
+    sales_by_cid: dict[int, list[dict]] = {c.id: [] for c in customers}
+    if customers:
+        ids = [c.id for c in customers]
+        sales = (
+            db.query(Sale)
+            .options(selectinload(Sale.items))
+            .filter(Sale.customer_id.in_(ids))
+            .order_by(Sale.created_at.desc(), Sale.id.desc())
+            .all()
+        )
+        for sale in sales:
+            if sale.customer_id in sales_by_cid:
+                sales_by_cid[sale.customer_id].append(_serialize_sale(sale))
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["name", "phone", "orders", "spent", "last_order_at", "invoices"])
+    for c in customers:
+        a = agg.get(c.id, {})
+        w.writerow(
+            [
+                c.name,
+                c.phone or "",
+                a.get("orders", 0),
+                a.get("spent", 0.0),
+                a.get("last_order_at") or "",
+                json.dumps(sales_by_cid.get(c.id, []), ensure_ascii=False),
+            ]
+        )
+
+    log_action(
+        db,
+        action="customer.export",
+        user_id=user.id,
+        details={"count": len(customers), "q": term or None},
+        request=request,
+    )
+    return StreamingResponse(
+        iter([buf.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=customers.csv"},
+    )
+
+
 @router.get("/{customer_id}/sales")
 def customer_sales(
     customer_id: int,
     db: Session = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    _u: User = Depends(require_role("Moderator")),
 ):
     cust = db.get(Customer, customer_id)
     if not cust:
