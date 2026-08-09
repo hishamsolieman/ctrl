@@ -5,6 +5,7 @@ import { ToastProvider } from "@/context/ToastContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Login from "@/pages/Login";
+import ResetPassword from "@/pages/ResetPassword";
 import Dashboard from "@/pages/Dashboard";
 import TodaySales from "@/pages/TodaySales";
 import Cashier from "@/pages/Cashier";
@@ -22,12 +23,23 @@ import Expenses from "@/pages/Expenses";
 import Funds from "@/pages/Funds";
 import Preloader from "@/components/Preloader";
 
-// Redirect authenticated users away from /login.
+// Redirect authenticated users away from /login (or into the forced reset).
 function LoginRoute() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, mustResetPassword } = useAuth();
   if (loading) return <Preloader />;
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  if (isAuthenticated) {
+    return <Navigate to={mustResetPassword ? "/reset-password" : "/dashboard"} replace />;
+  }
   return <Login />;
+}
+
+// Authenticated-only page. Users who already changed their password leave.
+function ResetPasswordRoute() {
+  const { isAuthenticated, loading, mustResetPassword } = useAuth();
+  if (loading) return <Preloader />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!mustResetPassword) return <Navigate to="/dashboard" replace />;
+  return <ResetPassword />;
 }
 
 export default function App() {
@@ -38,6 +50,7 @@ export default function App() {
           <BrowserRouter>
           <Routes>
           <Route path="/login" element={<LoginRoute />} />
+          <Route path="/reset-password" element={<ResetPasswordRoute />} />
           <Route
             element={
               <ProtectedRoute>

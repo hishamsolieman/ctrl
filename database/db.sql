@@ -20,15 +20,16 @@ CREATE TABLE IF NOT EXISTS `roles` (
 
 -- Users: username + bcrypt password hash --------------------------------------
 CREATE TABLE IF NOT EXISTS `users` (
-  `id`            INT AUTO_INCREMENT PRIMARY KEY,
-  `username`      VARCHAR(100) NOT NULL UNIQUE,
-  `full_name`     VARCHAR(150) NULL,
-  `password_hash` VARCHAR(255) NOT NULL,
-  `is_active`     TINYINT(1)   NOT NULL DEFAULT 1,
-  `locale`        VARCHAR(10)  NOT NULL DEFAULT 'en',
-  `role_id`       INT          NOT NULL,
-  `created_at`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `id`                   INT AUTO_INCREMENT PRIMARY KEY,
+  `username`             VARCHAR(100) NOT NULL UNIQUE,
+  `full_name`            VARCHAR(150) NULL,
+  `password_hash`        VARCHAR(255) NOT NULL,
+  `is_active`            TINYINT(1)   NOT NULL DEFAULT 1,
+  `must_reset_password`  TINYINT(1)   NOT NULL DEFAULT 1,
+  `locale`               VARCHAR(10)  NOT NULL DEFAULT 'en',
+  `role_id`              INT          NOT NULL,
+  `created_at`           DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`           DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT `fk_users_role` FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -300,16 +301,20 @@ INSERT IGNORE INTO `roles` (`name`, `level`, `description`) VALUES
 -- Username: admin   Password: Oselfasads@2
 -- password_hash below is a bcrypt hash of the password above (never stored plaintext).
 INSERT IGNORE INTO `users`
-  (`username`, `full_name`, `password_hash`, `is_active`, `locale`, `role_id`)
+  (`username`, `full_name`, `password_hash`, `is_active`, `must_reset_password`, `locale`, `role_id`)
 SELECT
   'admin',
   'Super Administrator',
   '$2b$12$vT0W9.l3tIAwA1pFqVUDauderQCtJb8GnEgqNlfAnfisa5lOGpHK2',
   1,
+  0,
   'en',
   r.`id`
 FROM `roles` r
 WHERE r.`name` = 'SuperAdmin';
+
+-- Root SuperAdmin never needs a forced reset.
+UPDATE `users` SET `must_reset_password` = 0 WHERE `id` = 1;
 
 -- Brand + currency (configurable in the database) -----------------------------
 INSERT IGNORE INTO `settings` (`key`, `value`) VALUES
@@ -358,11 +363,11 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('common', 'welcome', 'en', 'Welcome'),
   ('ui', 'auth.genericError', 'ar', 'حدث خطأ ما. الرجاء المحاولة مرة أخرى.'),
   ('ui', 'auth.genericError', 'en', 'Something went wrong. Please try again.'),
-  ('ui', 'auth.invalidCredentials', 'ar', 'اسم المستخدم أو كلمة المرور غير صحيحة.'),
+  ('ui', 'auth.invalidCredentials', 'ar', 'اسم المستخدم أو كلمة السر غير صحيحة.'),
   ('ui', 'auth.invalidCredentials', 'en', 'Invalid username or password.'),
-  ('ui', 'auth.password', 'ar', 'كلمة المرور'),
+  ('ui', 'auth.password', 'ar', 'كلمة السر'),
   ('ui', 'auth.password', 'en', 'Password'),
-  ('ui', 'auth.passwordPlaceholder', 'ar', 'أدخل كلمة المرور'),
+  ('ui', 'auth.passwordPlaceholder', 'ar', 'أدخل كلمة السر'),
   ('ui', 'auth.passwordPlaceholder', 'en', 'Enter your password'),
   ('ui', 'auth.rememberMe', 'ar', 'تذكرني'),
   ('ui', 'auth.rememberMe', 'en', 'Remember me'),
@@ -370,7 +375,7 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'auth.signInButton', 'en', 'Sign In'),
   ('ui', 'auth.signingIn', 'ar', 'جارٍ تسجيل الدخول'),
   ('ui', 'auth.signingIn', 'en', 'Signing in'),
-  ('ui', 'auth.signInSubtitle', 'ar', 'أدخل اسم المستخدم وكلمة المرور.'),
+  ('ui', 'auth.signInSubtitle', 'ar', 'أدخل اسم المستخدم وكلمة السر.'),
   ('ui', 'auth.signInSubtitle', 'en', 'Enter your username and password.'),
   ('ui', 'auth.signInTitle', 'ar', 'تسجيل الدخول'),
   ('ui', 'auth.signInTitle', 'en', 'Sign In'),
@@ -1450,7 +1455,7 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'users.title', 'en', 'User Management'),
   ('ui', 'users.title', 'ar', 'إدارة المستخدمين'),
   ('ui', 'users.subtitle', 'en', 'Manage accounts, privileges and passwords.'),
-  ('ui', 'users.subtitle', 'ar', 'إدارة الحسابات والصلاحيات وكلمات المرور.'),
+  ('ui', 'users.subtitle', 'ar', 'إدارة الحسابات والصلاحيات وكلمات السر.'),
   ('ui', 'users.add', 'en', 'Add User'),
   ('ui', 'users.add', 'ar', 'إضافة مستخدم'),
   ('ui', 'users.search', 'en', 'Search by username, name or role'),
@@ -1518,11 +1523,11 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'users.modal.role', 'en', 'Role'),
   ('ui', 'users.modal.role', 'ar', 'الدور'),
   ('ui', 'users.modal.password', 'en', 'Password'),
-  ('ui', 'users.modal.password', 'ar', 'كلمة المرور'),
+  ('ui', 'users.modal.password', 'ar', 'كلمة السر'),
   ('ui', 'users.modal.passwordPlaceholder', 'en', 'Leave blank to auto-generate'),
   ('ui', 'users.modal.passwordPlaceholder', 'ar', 'اتركه فارغًا للتوليد التلقائي'),
   ('ui', 'users.modal.passwordHint', 'en', 'If left blank, a strong password is generated and shown once.'),
-  ('ui', 'users.modal.passwordHint', 'ar', 'إذا تُرك فارغًا، يتم توليد كلمة مرور قوية وعرضها مرة واحدة.'),
+  ('ui', 'users.modal.passwordHint', 'ar', 'إذا تُرك فارغًا، يتم توليد كلمة سر قوية وعرضها مرة واحدة.'),
   ('ui', 'users.modal.active', 'en', 'Account active'),
   ('ui', 'users.modal.active', 'ar', 'الحساب مفعّل'),
   ('ui', 'users.modal.save', 'en', 'Save'),
@@ -1536,33 +1541,33 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'users.modal.updated', 'en', 'User updated.'),
   ('ui', 'users.modal.updated', 'ar', 'تم تحديث المستخدم.'),
   ('ui', 'users.reset.title', 'en', 'Reset password'),
-  ('ui', 'users.reset.title', 'ar', 'إعادة تعيين كلمة المرور'),
+  ('ui', 'users.reset.title', 'ar', 'إعادة تعيين كلمة السر'),
   ('ui', 'users.reset.action', 'en', 'Reset password'),
-  ('ui', 'users.reset.action', 'ar', 'إعادة تعيين كلمة المرور'),
+  ('ui', 'users.reset.action', 'ar', 'إعادة تعيين كلمة السر'),
   ('ui', 'users.reset.body', 'en', 'Set a new password for {{name}}.'),
-  ('ui', 'users.reset.body', 'ar', 'حدّد كلمة مرور جديدة لـ {{name}}.'),
+  ('ui', 'users.reset.body', 'ar', 'حدّد كلمة سر جديدة لـ {{name}}.'),
   ('ui', 'users.reset.customLabel', 'en', 'New password (optional)'),
-  ('ui', 'users.reset.customLabel', 'ar', 'كلمة المرور الجديدة (اختياري)'),
+  ('ui', 'users.reset.customLabel', 'ar', 'كلمة السر الجديدة (اختياري)'),
   ('ui', 'users.reset.placeholder', 'en', 'Leave blank to auto-generate'),
   ('ui', 'users.reset.placeholder', 'ar', 'اتركه فارغًا للتوليد التلقائي'),
   ('ui', 'users.reset.hint', 'en', 'A new password will be generated if left blank.'),
-  ('ui', 'users.reset.hint', 'ar', 'سيتم توليد كلمة مرور جديدة إذا تُرك فارغًا.'),
+  ('ui', 'users.reset.hint', 'ar', 'سيتم توليد كلمة سر جديدة إذا تُرك فارغًا.'),
   ('ui', 'users.reset.confirm', 'en', 'Reset & show'),
   ('ui', 'users.reset.confirm', 'ar', 'إعادة التعيين والعرض'),
   ('ui', 'users.cred.title', 'en', 'Account credentials'),
   ('ui', 'users.cred.title', 'ar', 'بيانات الحساب'),
   ('ui', 'users.cred.body', 'en', 'Share these credentials with the user. The password is shown only once.'),
-  ('ui', 'users.cred.body', 'ar', 'شارك هذه البيانات مع المستخدم. تُعرض كلمة المرور مرة واحدة فقط.'),
+  ('ui', 'users.cred.body', 'ar', 'شارك هذه البيانات مع المستخدم. تُعرض كلمة السر مرة واحدة فقط.'),
   ('ui', 'users.cred.username', 'en', 'Username'),
   ('ui', 'users.cred.username', 'ar', 'اسم المستخدم'),
   ('ui', 'users.cred.password', 'en', 'Password'),
-  ('ui', 'users.cred.password', 'ar', 'كلمة المرور'),
+  ('ui', 'users.cred.password', 'ar', 'كلمة السر'),
   ('ui', 'users.cred.copy', 'en', 'Copy password'),
-  ('ui', 'users.cred.copy', 'ar', 'نسخ كلمة المرور'),
+  ('ui', 'users.cred.copy', 'ar', 'نسخ كلمة السر'),
   ('ui', 'users.cred.copied', 'en', 'Password copied.'),
-  ('ui', 'users.cred.copied', 'ar', 'تم نسخ كلمة المرور.'),
+  ('ui', 'users.cred.copied', 'ar', 'تم نسخ كلمة السر.'),
   ('ui', 'users.cred.warning', 'en', 'This password will not be shown again.'),
-  ('ui', 'users.cred.warning', 'ar', 'لن يتم عرض كلمة المرور هذه مرة أخرى.'),
+  ('ui', 'users.cred.warning', 'ar', 'لن يتم عرض كلمة السر هذه مرة أخرى.'),
   ('ui', 'users.cred.done', 'en', 'Done'),
   ('ui', 'users.cred.done', 'ar', 'تم'),
   ('ui', 'users.errors.usernameShort', 'en', 'Username must be at least 3 characters.'),
@@ -1576,7 +1581,7 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'users.errors.badRole', 'en', 'Unknown role.'),
   ('ui', 'users.errors.badRole', 'ar', 'دور غير معروف.'),
   ('ui', 'users.errors.passwordShort', 'en', 'Password must be at least 8 characters.'),
-  ('ui', 'users.errors.passwordShort', 'ar', 'يجب أن تكون كلمة المرور 8 أحرف على الأقل.'),
+  ('ui', 'users.errors.passwordShort', 'ar', 'يجب أن تكون كلمة السر 8 أحرف على الأقل.'),
   ('ui', 'users.errors.cannotManage', 'en', 'You are not allowed to manage this account.'),
   ('ui', 'users.errors.cannotManage', 'ar', 'لا يُسمح لك بإدارة هذا الحساب.'),
   ('ui', 'users.errors.cannotChangeImage', 'en', 'You are not allowed to change the user image.'),
@@ -2811,3 +2816,72 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
 
 -- The old overview tiles are gone; these keys have no reference left.
 DELETE FROM `translations` WHERE `namespace` = 'ui' AND `key` IN ('dashboard.roleLabel', 'dashboard.title');
+
+-- Forced password reset (self-service after login) ----------------------------
+INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
+  ('ui', 'auth.reset.title', 'en', 'Reset your password'),
+  ('ui', 'auth.reset.title', 'ar', 'إعادة تعيين كلمة السر'),
+  ('ui', 'auth.reset.subtitle', 'en', 'You must set a new password before continuing.'),
+  ('ui', 'auth.reset.subtitle', 'ar', 'يجب تعيين كلمة سر جديدة قبل المتابعة.'),
+  ('ui', 'auth.reset.password', 'en', 'New password'),
+  ('ui', 'auth.reset.password', 'ar', 'كلمة السر الجديدة'),
+  ('ui', 'auth.reset.passwordPlaceholder', 'en', 'Enter a new password'),
+  ('ui', 'auth.reset.passwordPlaceholder', 'ar', 'أدخل كلمة سر جديدة'),
+  ('ui', 'auth.reset.confirm', 'en', 'Confirm password'),
+  ('ui', 'auth.reset.confirm', 'ar', 'تأكيد كلمة السر'),
+  ('ui', 'auth.reset.confirmPlaceholder', 'en', 'Re-enter your new password'),
+  ('ui', 'auth.reset.confirmPlaceholder', 'ar', 'أعد إدخال كلمة السر الجديدة'),
+  ('ui', 'auth.reset.submit', 'en', 'Save password'),
+  ('ui', 'auth.reset.submit', 'ar', 'حفظ كلمة السر'),
+  ('ui', 'auth.reset.saving', 'en', 'Saving'),
+  ('ui', 'auth.reset.saving', 'ar', 'جارٍ الحفظ'),
+  ('ui', 'auth.reset.success', 'en', 'Password updated. Welcome back.'),
+  ('ui', 'auth.reset.success', 'ar', 'تم تحديث كلمة السر. مرحبًا بعودتك.'),
+  ('ui', 'auth.reset.hint', 'en', 'Use at least 8 characters.'),
+  ('ui', 'auth.reset.hint', 'ar', 'استخدم 8 أحرف على الأقل.'),
+  ('ui', 'auth.reset.errors.passwordShort', 'en', 'Password must be at least 8 characters.'),
+  ('ui', 'auth.reset.errors.passwordShort', 'ar', 'يجب أن تكون كلمة السر 8 أحرف على الأقل.'),
+  ('ui', 'auth.reset.errors.mismatch', 'en', 'Passwords do not match.'),
+  ('ui', 'auth.reset.errors.mismatch', 'ar', 'كلمتا السر غير متطابقتين.'),
+  ('ui', 'auth.reset.errors.samePassword', 'en', 'Choose a password different from your current one.'),
+  ('ui', 'auth.reset.errors.samePassword', 'ar', 'اختر كلمة سر مختلفة عن كلمة السر الحالية.'),
+  ('ui', 'auth.reset.errors.required', 'en', 'Enter and confirm your new password.'),
+  ('ui', 'auth.reset.errors.required', 'ar', 'أدخل كلمة السر الجديدة وأكدها.');
+
+-- Existing installs: INSERT IGNORE will not rewrite Arabic "كلمة المرور" → "كلمة السر".
+UPDATE `translations` SET `value` = 'اسم المستخدم أو كلمة السر غير صحيحة.'
+  WHERE `namespace` = 'ui' AND `key` = 'auth.invalidCredentials' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'auth.password' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'أدخل كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'auth.passwordPlaceholder' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'أدخل اسم المستخدم وكلمة السر.'
+  WHERE `namespace` = 'ui' AND `key` = 'auth.signInSubtitle' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'إدارة الحسابات والصلاحيات وكلمات السر.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.subtitle' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'users.modal.password' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'إذا تُرك فارغًا، يتم توليد كلمة سر قوية وعرضها مرة واحدة.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.modal.passwordHint' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'إعادة تعيين كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'users.reset.title' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'إعادة تعيين كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'users.reset.action' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'حدّد كلمة سر جديدة لـ {{name}}.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.reset.body' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'كلمة السر الجديدة (اختياري)'
+  WHERE `namespace` = 'ui' AND `key` = 'users.reset.customLabel' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'سيتم توليد كلمة سر جديدة إذا تُرك فارغًا.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.reset.hint' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'شارك هذه البيانات مع المستخدم. تُعرض كلمة السر مرة واحدة فقط.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.cred.body' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'users.cred.password' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'نسخ كلمة السر'
+  WHERE `namespace` = 'ui' AND `key` = 'users.cred.copy' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'تم نسخ كلمة السر.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.cred.copied' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'لن يتم عرض كلمة السر هذه مرة أخرى.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.cred.warning' AND `locale` = 'ar';
+UPDATE `translations` SET `value` = 'يجب أن تكون كلمة السر 8 أحرف على الأقل.'
+  WHERE `namespace` = 'ui' AND `key` = 'users.errors.passwordShort' AND `locale` = 'ar';

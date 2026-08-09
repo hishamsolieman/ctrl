@@ -190,6 +190,18 @@ def patch_schema() -> None:
                 "ALTER TABLE `users` ADD COLUMN `image_id` INT NULL AFTER `locale`"
             )
 
+        # users.must_reset_password — force a password change after login.
+        # Existing accounts start forced except the root SuperAdmin (id = 1).
+        if not _has_col("users", "must_reset_password"):
+            conn.exec_driver_sql(
+                "ALTER TABLE `users` "
+                "ADD COLUMN `must_reset_password` TINYINT(1) NOT NULL DEFAULT 1 "
+                "AFTER `is_active`"
+            )
+            conn.exec_driver_sql(
+                "UPDATE `users` SET `must_reset_password` = 0 WHERE `id` = 1"
+            )
+
         # Drop legacy sales snapshot columns — customer + payment are read via FK.
         for col in ("customer_name", "customer_phone", "payment_method"):
             if _has_col("sales", col):

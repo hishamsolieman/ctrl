@@ -10,6 +10,7 @@ class UserOut(BaseModel):
     role: str
     role_level: int
     locale: str
+    must_reset_password: bool = False
 
     class Config:
         from_attributes = True

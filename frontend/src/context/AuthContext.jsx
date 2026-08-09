@@ -65,9 +65,31 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
+  // Clears must_reset_password on the server and refreshes the local user.
+  const changePassword = useCallback(async (password, confirmPassword) => {
+    const { data } = await api.post("/auth/change-password", {
+      password,
+      confirm_password: confirmPassword,
+    });
+    setUser(data);
+    return data;
+  }, []);
+
+  const mustResetPassword = !!user?.must_reset_password;
+
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAuthenticated: !!token, login, logout, updateLocale }}
+      value={{
+        user,
+        token,
+        loading,
+        isAuthenticated: !!token,
+        mustResetPassword,
+        login,
+        logout,
+        updateLocale,
+        changePassword,
+      }}
     >
       {children}
     </AuthContext.Provider>

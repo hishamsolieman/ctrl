@@ -18,6 +18,8 @@ class User(Base):
     # bcrypt hash — never store plaintext
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # True until the user sets their own password (new account / admin reset).
+    must_reset_password: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # preferred UI language, e.g. "en" | "ar"
     locale: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
 

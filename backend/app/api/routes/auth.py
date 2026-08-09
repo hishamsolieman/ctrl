@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenResponse
 from app.schemas.user import UserOut
@@ -15,9 +15,16 @@ from app.services.logging import log_action
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+MIN_PASSWORD_LEN = 8
+
 
 class LocaleUpdate(BaseModel):
     locale: str = Field(min_length=2, max_length=10)
+
+
+class ChangePasswordRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+    confirm_password: str = Field(min_length=1, max_length=200)
 
 
 def _user_out(user: User) -> UserOut:
@@ -28,6 +35,7 @@ def _user_out(user: User) -> UserOut:
         role=user.role.name if user.role else "",
         role_level=user.role.level if user.role else 0,
         locale=user.locale,
+        must_reset_password=bool(user.must_reset_password),
     )
 
 
@@ -83,4 +91,37 @@ def update_my_locale(
     db.refresh(user)
     log_action(db, action="user.locale", user_id=user.id,
                details={"locale": code}, request=request)
+    return _user_out(user)
+
+
+@router.post("/change-password", response_model=UserOut)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Self-service password change. Clears the forced-reset flag on success."""
+    password = (payload.password or "").strip()
+    confirm = (payload.confirm_password or "").strip()
+
+    if len(password) < MIN_PASSWORD_LEN:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "auth.reset.errors.passwordShort")
+    if password != confirm:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "auth.reset.errors.mismatch")
+    if verify_password(password, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "auth.reset.errors.samePassword")
+
+    user.password_hash = hash_password(password)
+    user.must_reset_password = False
+    db.commit()
+    db.refresh(user)
+    log_action(
+        db,
+        action="auth.change_password",
+        user_id=user.id,
+        entity="user",
+        entity_id=user.id,
+        request=request,
+    )
     return _user_out(user)

@@ -297,6 +297,7 @@ def create_user(
         password_hash=hash_password(password),
         role_id=role.id,
         is_active=True,
+        must_reset_password=True,
         image_id=image_id,
     )
     db.add(user)
@@ -378,6 +379,7 @@ def reset_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "users.errors.passwordShort")
 
     target.password_hash = hash_password(password)
+    target.must_reset_password = True
     db.commit()
     log_action(db, action="user.reset_password", user_id=actor.id, entity="user",
                entity_id=target.id, request=request)
