@@ -26,7 +26,6 @@ import {
   IconTrash,
   IconDownload,
   IconBriefcase,
-  IconLayers,
   IconChart,
   IconBox,
 } from "@/components/icons";
@@ -34,33 +33,31 @@ import {
 const ADMIN_LEVEL = 30;
 const PAGE_SIZE = 10;
 
-// Card order: Business capital first, then the reference-guide metrics.
-const METRICS = ["B", "T", "COGS", "R", "E", "P", "M", "S", "F", "C"];
+// Card order: Business capital first. Funds (F) sits where COGS used to be.
+const METRICS = ["B", "T", "F", "R", "E", "P", "M", "S", "C"];
 const HIDDEN = Object.fromEntries(METRICS.map((k) => [k, false]));
 const PCT_KEYS = new Set(["M"]);
 
 const TONES = {
   B: "accent",
   T: "emerald",
-  COGS: "amber",
+  F: "amber",
   R: "sky",
   E: "rose",
   P: "emerald",
   M: "violet",
   S: "sky",
-  F: "accent",
   C: "violet",
 };
 const ICONS = {
   B: IconBriefcase,
   T: IconTrendUp,
-  COGS: IconLayers,
+  F: IconWallet,
   R: IconScale,
   E: IconTrendDown,
   P: IconCoins,
   M: IconChart,
   S: IconBox,
-  F: IconWallet,
   C: IconScale,
 };
 

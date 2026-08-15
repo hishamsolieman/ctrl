@@ -25,7 +25,7 @@ import {
 } from "@/components/icons";
 import { mediaUrl } from "@/lib/products";
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 10;
 const MODERATOR_LEVEL = 20;
 const MASK = "\u2217\u2217\u2217"; // ***
 
@@ -46,7 +46,7 @@ const ROLE_TONE = {
 function StatCard({ Icon, label, value, sub, foot, tone = "emerald", secretSub, revealed, onToggleSecret, revealLabel, hideLabel }) {
   const c = TONES[tone] || TONES.emerald;
   return (
-    <div className={`ctrl-card relative overflow-hidden bg-gradient-to-br ${c.grad} to-transparent p-5`}>
+    <div className={`ctrl-card relative flex min-h-[7.5rem] flex-col overflow-hidden bg-gradient-to-br ${c.grad} to-transparent p-5`}>
       <span className={`pointer-events-none absolute -start-8 -top-10 h-24 w-24 rounded-full ${c.glow} blur-2xl`} />
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -68,7 +68,7 @@ function StatCard({ Icon, label, value, sub, foot, tone = "emerald", secretSub, 
           <Icon width={22} height={22} />
         </span>
       </div>
-      {foot && <div className="relative mt-3 border-t border-border/60 pt-2">{foot}</div>}
+      {foot && <div className="relative mt-auto border-t border-border/60 pt-2">{foot}</div>}
     </div>
   );
 }
@@ -205,7 +205,7 @@ export default function Users() {
           } />
         <StatCard tone="sky" Icon={IconCheck} label={t("users.stats.active")}
           value={stats ? `${stats.active}/${stats.total}` : "—"}
-          sub={t("users.stats.activeSub")} />
+          foot={<p className="truncate text-xs text-muted">{t("users.stats.activeSub")}</p>} />
         <StatCard tone="violet" Icon={IconStar} label={t("users.stats.topSeller")}
           value={stats?.topSeller ? stats.topSeller.name : t("users.stats.none")}
           sub={stats?.topSeller ? money(stats.topSeller.revenue) : ""}
