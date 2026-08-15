@@ -2595,7 +2595,23 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'dashboard.tables.code', 'en', 'Barcode'),
   ('ui', 'dashboard.tables.code', 'ar', 'الباركود'),
   ('ui', 'dashboard.tables.qty', 'en', 'Qty'),
-  ('ui', 'dashboard.tables.qty', 'ar', 'الكمية');
+  ('ui', 'dashboard.tables.qty', 'ar', 'الكمية'),
+  ('ui', 'dashboard.charts.attrHint', 'en', 'Sales by {{name}}, last {{count}} days'),
+  ('ui', 'dashboard.charts.attrHint', 'ar', 'المبيعات حسب {{name}}، آخر {{count}} يوم'),
+  ('ui', 'dashboard.charts.purchase', 'en', 'Purchase frequency'),
+  ('ui', 'dashboard.charts.purchase', 'ar', 'تكرار الشراء'),
+  ('ui', 'dashboard.charts.purchaseHint', 'en', 'How often customers bought, last {{count}} days'),
+  ('ui', 'dashboard.charts.purchaseHint', 'ar', 'كم مرة اشترى العملاء، آخر {{count}} يوم'),
+  ('ui', 'dashboard.charts.buyOnce', 'en', '1 purchase'),
+  ('ui', 'dashboard.charts.buyOnce', 'ar', 'شراء واحد'),
+  ('ui', 'dashboard.charts.buyTwice', 'en', '2 purchases'),
+  ('ui', 'dashboard.charts.buyTwice', 'ar', 'شراءان'),
+  ('ui', 'dashboard.charts.buyFew', 'en', '3–4 purchases'),
+  ('ui', 'dashboard.charts.buyFew', 'ar', '3–4 مشتريات'),
+  ('ui', 'dashboard.charts.buyMany', 'en', '5+ purchases'),
+  ('ui', 'dashboard.charts.buyMany', 'ar', '5+ مشتريات'),
+  ('ui', 'dashboard.charts.noAttrData', 'en', 'No sales for this attribute yet.'),
+  ('ui', 'dashboard.charts.noAttrData', 'ar', 'لا توجد مبيعات لهذه السمة بعد.');
 
 -- Business report (printable A4 document) --------------------------------------
 INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES

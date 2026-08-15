@@ -31,7 +31,7 @@ const NAV = [
     key: "nav.dashboard",
     Icon: IconDashboard,
     children: [
-      { to: "/dashboard", key: "nav.dashboardOverview", Icon: IconGrid, end: true },
+      { to: "/dashboard", key: "nav.dashboardOverview", Icon: IconGrid, end: true, minLevel: 30 },
       { to: "/dashboard/today", key: "nav.todaySales", Icon: IconTrendUp },
     ],
   },

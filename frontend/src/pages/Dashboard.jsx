@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import Chart from "react-apexcharts";
 import { useToast } from "@/context/ToastContext";
@@ -45,6 +46,8 @@ const SECRETS = [
   "grossValue",
 ];
 const HIDDEN = Object.fromEntries(SECRETS.map((k) => [k, false]));
+const ADMIN_LEVEL = 30;
+const PAIR_H = 300;
 
 const hourLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0"));
 // Backend weekday rows are Sunday-first; read them Monday-first.
@@ -72,6 +75,7 @@ export default function Dashboard() {
   const toast = useToast();
   const { user } = useAuth();
   const brand = useBrand();
+  const isAdmin = (user?.role_level ?? 0) >= ADMIN_LEVEL;
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -90,8 +94,8 @@ export default function Dashboard() {
   }, [t, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (isAdmin) load();
+  }, [load, isAdmin]);
 
   const currency = data?.currency || "";
   const money = useCallback(
@@ -254,7 +258,7 @@ export default function Dashboard() {
         data?.expense_types,
         (e) => (e.type === "other" ? e.name || t("expenses.types.other") : t(`expenses.types.${e.type}`)),
         (e) => e.amount,
-        280,
+        PAIR_H,
         ["#FB7185", "#FBBF24", "#A78BFA", "#38BDF8", theme.accent, "#34D399"]
       ),
     [data, donut, t]
@@ -310,7 +314,7 @@ export default function Dashboard() {
         (r) => r.name,
         (r) => r.amount,
         (v, row) => `${money(v)} · ${num(row?.orders || 0)}`,
-        280
+        PAIR_H
       ),
     [data, hBar, money, num]
   );
@@ -321,7 +325,7 @@ export default function Dashboard() {
         (r) => r.full_name || r.username,
         (r) => r.amount,
         (v, row) => `${money(v)} · ${num(row?.orders || 0)}`,
-        280
+        PAIR_H
       ),
     [data, hBar, money, num]
   );
@@ -332,7 +336,7 @@ export default function Dashboard() {
     return {
       options: {
         ...base,
-        chart: { ...base.chart, type: "bar", height: 280 },
+        chart: { ...base.chart, type: "bar", height: PAIR_H },
         colors: [theme.accent],
         plotOptions: { bar: { columnWidth: "60%", borderRadius: 2, borderRadiusApplication: "end" } },
         legend: { show: false },
@@ -357,7 +361,7 @@ export default function Dashboard() {
     return {
       options: {
         ...base,
-        chart: { ...base.chart, type: "radar", height: 280 },
+        chart: { ...base.chart, type: "radar", height: PAIR_H },
         colors: [theme.accent],
         fill: { opacity: 0.22 },
         stroke: { width: 2 },
@@ -382,7 +386,7 @@ export default function Dashboard() {
     return {
       options: {
         ...base,
-        chart: { ...base.chart, type: "bar", height: 280 },
+        chart: { ...base.chart, type: "bar", height: PAIR_H },
         colors: PALETTE,
         plotOptions: {
           bar: { distributed: true, columnWidth: "55%", borderRadius: 4, borderRadiusApplication: "end" },
@@ -409,6 +413,46 @@ export default function Dashboard() {
       series: [{ name: t("dashboard.charts.units"), data: rows.map((c) => c.quantity) }],
     };
   }, [data, isAr, money, num, t]);
+
+  const purchaseLabel = useCallback(
+    (key) =>
+      ({
+        once: t("dashboard.charts.buyOnce"),
+        twice: t("dashboard.charts.buyTwice"),
+        few: t("dashboard.charts.buyFew"),
+        many: t("dashboard.charts.buyMany"),
+      })[key] || key,
+    [t]
+  );
+  const purchaseChart = useMemo(
+    () =>
+      hBar(
+        data?.purchase_behavior,
+        (r) => purchaseLabel(r.key),
+        (r) => r.amount,
+        (v, row) => `${money(v)} · ${num(row?.customers || 0)}`
+      ),
+    [data, hBar, money, num, purchaseLabel]
+  );
+
+  const attrCharts = useMemo(() => {
+    return (data?.attribute_sales || []).map((attr) => {
+      const name = isAr ? attr.name_ar || attr.name_en : attr.name_en;
+      const rows = [...(attr.values || [])].sort((a, b) => (b.amount || 0) - (a.amount || 0));
+      return {
+        attr,
+        name,
+        chart: hBar(
+          rows,
+          (v) => (isAr ? v.value_ar || v.value_en : v.value_en),
+          (v) => v.amount,
+          (v, row) => `${money(v)} · ${num(row?.quantity || 0)}×`
+        ),
+      };
+    });
+  }, [data, isAr, hBar, money, num]);
+
+  if (!isAdmin) return <Navigate to="/dashboard/today" replace />;
 
   if (loading && !data) {
     return (
@@ -502,8 +546,8 @@ export default function Dashboard() {
       </div>
 
       {/* Money KPIs */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(0)}>
+      <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(0)}>
           <StatCard
             Icon={IconWallet}
             label={t("dashboard.cards.revenue")}
@@ -521,7 +565,7 @@ export default function Dashboard() {
         </div>
 
         {business && (
-          <div className="ctrl-rise ctrl-sheen relative" style={rise(1)}>
+          <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(1)}>
             <StatCard
               Icon={IconCoins}
               label={t("dashboard.cards.grossProfit")}
@@ -540,7 +584,7 @@ export default function Dashboard() {
         )}
 
         {business && (
-          <div className="ctrl-rise ctrl-sheen relative" style={rise(2)}>
+          <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(2)}>
             <StatCard
               Icon={IconScale}
               label={t("dashboard.cards.netProfit")}
@@ -557,7 +601,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(3)}>
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(3)}>
           <StatCard
             Icon={IconReceipt}
             label={t("dashboard.cards.orders")}
@@ -573,7 +617,7 @@ export default function Dashboard() {
           />
         </div>
 
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(4)}>
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(4)}>
           <StatCard
             Icon={IconTag}
             label={t("dashboard.cards.avgTicket")}
@@ -589,7 +633,7 @@ export default function Dashboard() {
           />
         </div>
 
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(5)}>
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(5)}>
           <StatCard
             Icon={IconClock}
             label={t("dashboard.cards.today")}
@@ -606,7 +650,7 @@ export default function Dashboard() {
           />
         </div>
 
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(6)}>
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(6)}>
           <StatCard
             Icon={IconChart}
             label={t("dashboard.cards.expenses")}
@@ -623,7 +667,7 @@ export default function Dashboard() {
           />
         </div>
 
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(7)}>
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(7)}>
           <StatCard
             Icon={IconUsers}
             label={t("dashboard.cards.customers")}
@@ -642,7 +686,7 @@ export default function Dashboard() {
         </div>
 
         {business && (
-          <div className="ctrl-rise ctrl-sheen relative" style={rise(8)}>
+          <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(8)}>
             <StatCard
               Icon={IconBox}
               label={t("dashboard.cards.inventoryValue")}
@@ -659,7 +703,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="ctrl-rise ctrl-sheen relative" style={rise(9)}>
+        <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(9)}>
           <StatCard
             Icon={IconLayers}
             label={t("dashboard.cards.stockOnHand")}
@@ -678,7 +722,7 @@ export default function Dashboard() {
         </div>
 
         {business && (
-          <div className="ctrl-rise ctrl-sheen relative" style={rise(10)}>
+          <div className="ctrl-rise ctrl-sheen relative h-full" style={rise(10)}>
             <StatCard
               Icon={IconBriefcase}
               label={t("dashboard.cards.grossValue")}
@@ -697,7 +741,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="ctrl-rise relative" style={rise(11)}>
+        <div className="ctrl-rise relative h-full" style={rise(11)}>
           <StatCard
             Icon={IconRefresh}
             label={t("dashboard.cards.stockAlerts")}
@@ -730,153 +774,189 @@ export default function Dashboard() {
         </ChartCard>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="ctrl-rise" style={rise(2)}>
+      <div className="grid items-stretch gap-4 lg:grid-cols-2">
+        <div className="ctrl-rise h-full" style={rise(2)}>
           <ChartCard
             title={t("dashboard.charts.monthly")}
             hint={t("dashboard.charts.monthlyHint")}
             empty={!monthlyChart}
             emptyText={emptyText}
-            height={320}
+            height={PAIR_H}
           >
             {monthlyChart && (
-              <Chart options={monthlyChart.options} series={monthlyChart.series} type="line" height={320} />
+              <Chart options={monthlyChart.options} series={monthlyChart.series} type="line" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(3)}>
+        <div className="ctrl-rise h-full" style={rise(3)}>
           <ChartCard
             title={t("dashboard.charts.products")}
             hint={windowHint}
             empty={!productChart}
             emptyText={emptyText}
-            height={300}
+            height={PAIR_H}
           >
             {productChart && (
-              <Chart options={productChart.options} series={productChart.series} type="bar" height={300} />
+              <Chart options={productChart.options} series={productChart.series} type="bar" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(4)}>
+        <div className="ctrl-rise h-full" style={rise(4)}>
           <ChartCard
             title={t("dashboard.charts.payments")}
             hint={windowHint}
             empty={!paymentChart}
             emptyText={emptyText}
-            height={300}
+            height={PAIR_H}
           >
             {paymentChart && (
-              <Chart options={paymentChart.options} series={paymentChart.series} type="donut" height={300} />
+              <Chart options={paymentChart.options} series={paymentChart.series} type="donut" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(5)}>
+        <div className="ctrl-rise h-full" style={rise(5)}>
           <ChartCard
             title={t("dashboard.charts.categories")}
             hint={windowHint}
             empty={!categoryChart}
             emptyText={emptyText}
-            height={300}
+            height={PAIR_H}
           >
             {categoryChart && (
-              <Chart options={categoryChart.options} series={categoryChart.series} type="donut" height={300} />
+              <Chart options={categoryChart.options} series={categoryChart.series} type="donut" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(6)}>
+        <div className="ctrl-rise h-full" style={rise(6)}>
           <ChartCard
             title={t("dashboard.charts.hourly")}
             hint={t("dashboard.charts.hourlyHint")}
             empty={!hourlyChart}
             emptyText={emptyText}
-            height={280}
+            height={PAIR_H}
           >
             {hourlyChart && (
-              <Chart options={hourlyChart.options} series={hourlyChart.series} type="bar" height={280} />
+              <Chart options={hourlyChart.options} series={hourlyChart.series} type="bar" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(7)}>
+        <div className="ctrl-rise h-full" style={rise(7)}>
           <ChartCard
             title={t("dashboard.charts.weekday")}
             hint={t("dashboard.charts.weekdayHint")}
             empty={!weekdayChart}
             emptyText={emptyText}
-            height={280}
+            height={PAIR_H}
           >
             {weekdayChart && (
-              <Chart options={weekdayChart.options} series={weekdayChart.series} type="radar" height={280} />
+              <Chart options={weekdayChart.options} series={weekdayChart.series} type="radar" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(8)}>
+        <div className="ctrl-rise h-full" style={rise(8)}>
           <ChartCard
             title={t("dashboard.charts.stock")}
             hint={t("dashboard.charts.stockHint")}
             empty={!stockChart}
             emptyText={emptyText}
-            height={280}
+            height={PAIR_H}
           >
             {stockChart && (
-              <Chart options={stockChart.options} series={stockChart.series} type="bar" height={280} />
+              <Chart options={stockChart.options} series={stockChart.series} type="bar" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(9)}>
+        <div className="ctrl-rise h-full" style={rise(9)}>
           <ChartCard
             title={t("dashboard.charts.customers")}
             hint={t("dashboard.charts.customersHint")}
             empty={!customerChart}
             emptyText={emptyText}
-            height={280}
+            height={PAIR_H}
           >
             {customerChart && (
-              <Chart options={customerChart.options} series={customerChart.series} type="bar" height={280} />
+              <Chart options={customerChart.options} series={customerChart.series} type="bar" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
 
         {business && (
-          <div className="ctrl-rise" style={rise(10)}>
+          <div className="ctrl-rise h-full" style={rise(10)}>
             <ChartCard
               title={t("dashboard.charts.staff")}
               hint={windowHint}
               empty={!staffChart}
               emptyText={emptyText}
-              height={280}
+              height={PAIR_H}
             >
               {staffChart && (
-                <Chart options={staffChart.options} series={staffChart.series} type="bar" height={280} />
+                <Chart options={staffChart.options} series={staffChart.series} type="bar" height={PAIR_H} />
               )}
             </ChartCard>
           </div>
         )}
 
-        <div className="ctrl-rise" style={rise(11)}>
+        <div className="ctrl-rise h-full" style={rise(11)}>
           <ChartCard
             title={t("dashboard.charts.expenses")}
             hint={t("dashboard.charts.expensesHint")}
             empty={!expenseChart}
             emptyText={emptyText}
-            height={280}
+            height={PAIR_H}
           >
             {expenseChart && (
-              <Chart options={expenseChart.options} series={expenseChart.series} type="donut" height={280} />
+              <Chart options={expenseChart.options} series={expenseChart.series} type="donut" height={PAIR_H} />
             )}
           </ChartCard>
         </div>
       </div>
 
+      <div className="grid items-stretch gap-4 lg:grid-cols-2">
+          {attrCharts.map(({ attr, name, chart }, i) => (
+            <div key={attr.id} className="ctrl-rise h-full" style={rise(12 + i)}>
+              <ChartCard
+                title={name}
+                hint={t("dashboard.charts.attrHint", { name, count: windowDays })}
+                empty={!chart}
+                emptyText={t("dashboard.charts.noAttrData")}
+                height={PAIR_H}
+              >
+                {chart && (
+                  <Chart options={chart.options} series={chart.series} type="bar" height={PAIR_H} />
+                )}
+              </ChartCard>
+            </div>
+          ))}
+          <div className="ctrl-rise h-full" style={rise(12 + attrCharts.length)}>
+            <ChartCard
+              title={t("dashboard.charts.purchase")}
+              hint={t("dashboard.charts.purchaseHint", { count: windowDays })}
+              empty={!purchaseChart}
+              emptyText={emptyText}
+              height={PAIR_H}
+            >
+              {purchaseChart && (
+                <Chart
+                  options={purchaseChart.options}
+                  series={purchaseChart.series}
+                  type="bar"
+                  height={PAIR_H}
+                />
+              )}
+            </ChartCard>
+          </div>
+        </div>
+
       {/* Tables */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="ctrl-rise" style={rise(12)}>
+      <div className="grid items-stretch gap-4 lg:grid-cols-2">
+        <div className="ctrl-rise h-full" style={rise(12)}>
           <ChartCard
             title={t("dashboard.tables.recent")}
             hint={t("dashboard.tables.recentHint")}
@@ -920,7 +1000,7 @@ export default function Dashboard() {
           </ChartCard>
         </div>
 
-        <div className="ctrl-rise" style={rise(12)}>
+        <div className="ctrl-rise h-full" style={rise(12)}>
           <ChartCard
             title={t("dashboard.tables.lowStock")}
             hint={t("dashboard.tables.lowStockHint")}

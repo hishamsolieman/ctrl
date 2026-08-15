@@ -4,10 +4,8 @@
 day's CASH invoice total for this user − that user's expenses for the day; card
 payments never land in the drawer.
 
-``/dashboard/overview`` — the whole-business command centre. Admin/SuperAdmin see
-every user's figures plus cost, profit and capital blocks; everyone below that
-sees the same layout scoped to their own sales, with the money-sensitive blocks
-omitted from the payload entirely rather than merely hidden in the UI.
+``/dashboard/overview`` — the whole-business command centre. Admin/SuperAdmin
+only; cashiers and moderators use ``/dashboard/today``.
 """
 from __future__ import annotations
 
@@ -17,8 +15,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
 from app.core.database import get_db
+from app.models.attribute import Attribute, AttributeValue
 from app.models.category import Category
 from app.models.customer import Customer
 from app.models.expense import Expense
@@ -49,8 +48,6 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 CASH_CODE = "cash"
 TOP_PRODUCTS = 7
 
-# Whole-business visibility (cost, profit, other users' figures) starts here.
-BUSINESS_LEVEL = 30
 TOP_N = 8
 DAYS_WINDOW = 30
 WEEK_WINDOW = 90
@@ -95,6 +92,220 @@ def _hourly(db: Session, user_id: int, start: datetime, end: datetime) -> list[d
         count, amount = by_hour.get(h, (0, 0.0))
         out.append({"hour": h, "count": count, "amount": amount})
     return out
+
+
+def _map_value_id(mapping, attr_id: int) -> int | None:
+    if not mapping:
+        return None
+    raw = mapping.get(attr_id)
+    if raw is None:
+        raw = mapping.get(str(attr_id))
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _attribute_sales(db: Session, sale_scope: list, win_start: datetime) -> list[dict]:
+    """Units/revenue sold per value of every live product attribute."""
+    required = (
+        db.query(Attribute)
+        .filter(
+            Attribute.is_deleted.is_(False),
+            Attribute.is_active.is_(True),
+        )
+        .order_by(Attribute.is_required.desc(), Attribute.sort_order, Attribute.id)
+        .all()
+    )
+    if not required:
+        return []
+
+    item_rows = (
+        db.query(
+            SaleItem.attributes,
+            SaleItem.quantity,
+            SaleItem.line_total,
+            SaleItem.product_id,
+            SaleItem.variant_id,
+            SaleItem.stock_id,
+        )
+        .join(Sale, SaleItem.sale_id == Sale.id)
+        .filter(*sale_scope, Sale.created_at >= win_start)
+        .all()
+    )
+
+    product_ids = {r[3] for r in item_rows if r[3]}
+    variant_ids = {r[4] for r in item_rows if r[4]}
+    stock_ids = {r[5] for r in item_rows if r[5]}
+
+    product_attrs = {
+        pid: attrs or {}
+        for pid, attrs in (
+            db.query(Product.id, Product.attributes).filter(Product.id.in_(product_ids)).all()
+            if product_ids
+            else []
+        )
+    }
+    variant_attrs = {
+        vid: attrs or {}
+        for vid, attrs in (
+            db.query(ProductVariant.id, ProductVariant.attributes)
+            .filter(ProductVariant.id.in_(variant_ids))
+            .all()
+            if variant_ids
+            else []
+        )
+    }
+    stock_attrs = {
+        sid: attrs or {}
+        for sid, attrs in (
+            db.query(VariantStock.id, VariantStock.attributes)
+            .filter(VariantStock.id.in_(stock_ids))
+            .all()
+            if stock_ids
+            else []
+        )
+    }
+
+    value_by_id = {
+        av.id: {
+            "value_en": av.value_en,
+            "value_ar": av.value_ar,
+            "hex": (av.extra or {}).get("hex") if isinstance(av.extra, dict) else None,
+        }
+        for av in db.query(AttributeValue)
+        .filter(
+            AttributeValue.attribute_id.in_([a.id for a in required]),
+            AttributeValue.is_deleted.is_(False),
+        )
+        .all()
+    }
+
+    out: list[dict] = []
+    for attr in required:
+        name_en = (attr.name_en or "").strip().lower()
+        name_ar = (attr.name_ar or "").strip().lower()
+        buckets: dict[str, dict] = {}
+
+        for snap, qty, amount, pid, vid, sid in item_rows:
+            matched = None
+            if isinstance(snap, list):
+                for a in snap:
+                    if not isinstance(a, dict):
+                        continue
+                    if (a.get("name_en") or "").strip().lower() == name_en or (
+                        a.get("name_ar") or ""
+                    ).strip().lower() == name_ar:
+                        matched = {
+                            "value_en": a.get("value_en") or "",
+                            "value_ar": a.get("value_ar") or "",
+                            "hex": a.get("hex"),
+                        }
+                        break
+            if not matched:
+                value_id = (
+                    _map_value_id(stock_attrs.get(sid), attr.id)
+                    or _map_value_id(variant_attrs.get(vid), attr.id)
+                    or _map_value_id(product_attrs.get(pid), attr.id)
+                )
+                if value_id and value_id in value_by_id:
+                    matched = dict(value_by_id[value_id])
+            if not matched:
+                continue
+            key = (matched.get("value_en") or matched.get("value_ar") or "").strip()
+            if not key:
+                continue
+            bucket = buckets.get(key)
+            if bucket is None:
+                bucket = {
+                    "value_en": matched.get("value_en") or key,
+                    "value_ar": matched.get("value_ar") or key,
+                    "hex": matched.get("hex"),
+                    "quantity": 0,
+                    "amount": 0.0,
+                }
+                buckets[key] = bucket
+            bucket["quantity"] += int(qty or 0)
+            bucket["amount"] = f2(bucket["amount"] + float(amount or 0))
+
+        values = sorted(
+            buckets.values(),
+            key=lambda x: (x["amount"], x["quantity"]),
+            reverse=True,
+        )
+        out.append(
+            {
+                "id": attr.id,
+                "key": attr.key,
+                "type": attr.type,
+                "name_en": attr.name_en,
+                "name_ar": attr.name_ar,
+                "values": values,
+            }
+        )
+    return out
+
+
+def _purchase_behavior(db: Session, sale_scope: list, win_start: datetime) -> list[dict]:
+    """How often each customer bought in the window (1 / 2 / 3–4 / 5+ visits)."""
+    rows = (
+        db.query(Sale.customer_id, Sale.total)
+        .filter(*sale_scope, Sale.created_at >= win_start)
+        .all()
+    )
+    if not rows:
+        return []
+
+    by_customer: dict[int, dict] = {}
+    walk_amount = 0.0
+    walk_orders = 0
+    for cid, total in rows:
+        amt = float(total or 0)
+        if cid is None:
+            walk_orders += 1
+            walk_amount += amt
+            continue
+        bucket = by_customer.get(cid)
+        if bucket is None:
+            bucket = {"orders": 0, "amount": 0.0}
+            by_customer[cid] = bucket
+        bucket["orders"] += 1
+        bucket["amount"] += amt
+
+    bands = (
+        ("once", 1, 1),
+        ("twice", 2, 2),
+        ("few", 3, 4),
+        ("many", 5, None),
+    )
+    out = {
+        key: {"key": key, "customers": 0, "orders": 0, "amount": 0.0}
+        for key, _, _ in bands
+    }
+    if walk_orders:
+        out["once"]["customers"] += walk_orders
+        out["once"]["orders"] += walk_orders
+        out["once"]["amount"] += walk_amount
+
+    for stats in by_customer.values():
+        n = stats["orders"]
+        if n <= 1:
+            key = "once"
+        elif n == 2:
+            key = "twice"
+        elif n <= 4:
+            key = "few"
+        else:
+            key = "many"
+        out[key]["customers"] += 1
+        out[key]["orders"] += n
+        out[key]["amount"] += stats["amount"]
+
+    return [
+        {**row, "amount": f2(row["amount"])}
+        for row in out.values()
+        if row["customers"] > 0
+    ]
 
 
 @router.get("/today")
@@ -247,12 +458,10 @@ def _stock_base(db: Session, selects):
 
 
 @router.get("/overview")
-def overview(db: Session = Depends(get_db), actor: User = Depends(get_current_user)):
-    level = actor.role.level if actor.role else 0
-    business = level >= BUSINESS_LEVEL
-    # Below Admin every figure is narrowed to the caller's own activity.
-    sale_scope = [] if business else [Sale.user_id == actor.id]
-    exp_scope = [] if business else [Expense.user_id == actor.id]
+def overview(db: Session = Depends(get_db), actor: User = Depends(require_role("Admin"))):
+    business = True
+    sale_scope: list = []
+    exp_scope: list = []
 
     now = datetime.now()
     today = date.today()
@@ -705,4 +914,6 @@ def overview(db: Session = Depends(get_db), actor: User = Depends(get_current_us
         "stock_by_category": stock_by_category,
         "staff": staff,
         "recent_sales": recent,
+        "attribute_sales": _attribute_sales(db, sale_scope, win_start),
+        "purchase_behavior": _purchase_behavior(db, sale_scope, win_start),
     }

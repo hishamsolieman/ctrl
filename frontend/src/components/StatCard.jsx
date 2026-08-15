@@ -26,7 +26,7 @@ export default function StatCard({
 }) {
   const c = TONES[tone] || TONES.emerald;
   return (
-    <div className={`ctrl-card relative overflow-hidden bg-gradient-to-br ${c.grad} to-transparent p-5`}>
+    <div className={`ctrl-card relative flex h-full min-h-[7.5rem] flex-col overflow-hidden bg-gradient-to-br ${c.grad} to-transparent p-5`}>
       <span className={`pointer-events-none absolute -start-8 -top-10 h-24 w-24 rounded-full ${c.glow} blur-2xl`} />
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -52,7 +52,7 @@ export default function StatCard({
           <Icon width={22} height={22} />
         </span>
       </div>
-      {foot && <div className="relative mt-3 border-t border-border/60 pt-2 text-xs text-muted">{foot}</div>}
+      {foot && <div className="relative mt-auto border-t border-border/60 pt-2 text-xs text-muted">{foot}</div>}
     </div>
   );
 }
