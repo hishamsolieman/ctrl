@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
   listAttributes,
@@ -25,6 +27,7 @@ import {
 } from "@/components/icons";
 
 const PAGE_SIZE = 8;
+const SUPERADMIN_LEVEL = 40;
 
 function Badge({ children, tone = "muted" }) {
   const tones = {
@@ -41,7 +44,9 @@ function Badge({ children, tone = "muted" }) {
 export default function ProductAttributes() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const { user } = useAuth();
   const toast = useToast();
+  const canAccess = (user?.role_level ?? 0) >= SUPERADMIN_LEVEL;
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -65,8 +70,8 @@ export default function ProductAttributes() {
   }, [t, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (canAccess) load();
+  }, [load, canAccess]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -153,6 +158,8 @@ export default function ProductAttributes() {
       </div>
     );
   }
+
+  if (!canAccess) return <Navigate to="/products/list" replace />;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">

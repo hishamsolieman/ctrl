@@ -42,7 +42,7 @@ const NAV = [
     children: [
       { to: "/products/list", key: "nav.productList", Icon: IconList },
       { to: "/products/categories", key: "nav.productCategories", Icon: IconTag, minLevel: 20 },
-      { to: "/products/attributes", key: "nav.productAttributes", Icon: IconSliders },
+      { to: "/products/attributes", key: "nav.productAttributes", Icon: IconSliders, minLevel: 40 },
       { to: "/products/barcode", key: "nav.productBarcode", Icon: IconBarcode },
     ],
   },

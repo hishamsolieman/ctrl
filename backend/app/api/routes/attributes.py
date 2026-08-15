@@ -280,7 +280,7 @@ def _truthy(value) -> bool:
 def export_attributes(
     q: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
+    user: User = Depends(require_role("SuperAdmin")),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Export the live attributes matching the on-screen search. `values` is a
@@ -329,7 +329,7 @@ def export_attributes(
 async def import_attributes(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
+    user: User = Depends(require_role("SuperAdmin")),
     request: Request = None,  # type: ignore[assignment]
 ):
     content = (await file.read()).decode("utf-8-sig")
@@ -420,7 +420,7 @@ def create_attribute(
     payload: AttributeIn,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
+    user: User = Depends(require_role("SuperAdmin")),
 ):
     _validate_flags(payload)
     _ensure_unique_name(db, payload.name_en, payload.name_ar)
@@ -453,7 +453,7 @@ def update_attribute(
     payload: AttributeIn,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
+    user: User = Depends(require_role("SuperAdmin")),
 ):
     attr = db.get(Attribute, attribute_id)
     if not attr or attr.is_deleted:
@@ -500,7 +500,7 @@ def add_attribute_value(
     payload: ValueIn,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("Moderator")),
+    user: User = Depends(require_role("SuperAdmin")),
 ):
     """Append a value to an existing attribute (used from the product modal)."""
     attr = db.get(Attribute, attribute_id)
@@ -553,7 +553,7 @@ def delete_attribute(
     attribute_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("Admin")),
+    user: User = Depends(require_role("SuperAdmin")),
 ):
     attr = db.get(Attribute, attribute_id)
     if not attr or attr.is_deleted:
