@@ -16,18 +16,27 @@ in ``.env``.
 """
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, SessionLocal, engine
 
 # Ensure all models are imported so metadata is populated.
 import app.models  # noqa: F401
+from app.models.document import AppDocument
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_SQL_PATH = ROOT / "database" / "db.sql"
+DOCS_DIR = ROOT / "ref" / "documents"
+
+# Reference PDFs seeded into ``app_documents`` once; served from the DB at runtime.
+FUNDS_METRIC_PDFS = (
+    ("funds_metrics", "en", "Clothing Shop Financial Metrics - Simple Reference Guide_EN.pdf"),
+    ("funds_metrics", "ar", "Clothing Shop Financial Metrics - Simple Reference Guide_AR.pdf"),
+)
 
 
 def create_database() -> None:
@@ -281,6 +290,41 @@ def run_sql_file() -> None:
             conn.exec_driver_sql(stmt)
 
 
+def seed_documents() -> None:
+    """Load reference PDFs into ``app_documents`` if missing (idempotent)."""
+    if not DOCS_DIR.is_dir():
+        print(f"[init] Documents folder missing: {DOCS_DIR} — skipping PDF seed.")
+        return
+    db = SessionLocal()
+    try:
+        for doc_key, locale, filename in FUNDS_METRIC_PDFS:
+            exists = (
+                db.query(AppDocument.id)
+                .filter(AppDocument.doc_key == doc_key, AppDocument.locale == locale)
+                .first()
+            )
+            if exists:
+                continue
+            path = DOCS_DIR / filename
+            if not path.is_file():
+                print(f"[init] Missing PDF seed file: {path.name}")
+                continue
+            raw = path.read_bytes()
+            db.add(
+                AppDocument(
+                    doc_key=doc_key,
+                    locale=locale,
+                    filename=filename,
+                    mime="application/pdf",
+                    data=base64.b64encode(raw).decode("ascii"),
+                )
+            )
+            print(f"[init] Seeded document {doc_key}/{locale} ({len(raw)} bytes)")
+        db.commit()
+    finally:
+        db.close()
+
+
 def run() -> None:
     print(f"[init] Creating database '{settings.DB_NAME}' if needed...")
     create_database()
@@ -290,6 +334,8 @@ def run() -> None:
     patch_schema()
     print(f"[init] Applying seeds from {DB_SQL_PATH.name}...")
     run_sql_file()
+    print("[init] Seeding app documents (PDFs)...")
+    seed_documents()
     print("[init] Done.")
 
 

@@ -1,8 +1,30 @@
 import api from "@/lib/api";
 
-export async function fundsOverview() {
-  const { data } = await api.get("/funds/overview");
-  return data; // { currency, totals, baseline, months, top_suppliers, expense_types }
+export async function fundsOverview({ period, date_from, date_to } = {}) {
+  const params = {};
+  if (period) params.period = period;
+  if (date_from) params.date_from = date_from;
+  if (date_to) params.date_to = date_to;
+  const { data } = await api.get("/funds/overview", { params });
+  return data; // { currency, period, metrics, estimates, cashflow, margin_trend, profit_path, capital, expense_types }
+}
+
+export async function downloadFundsDocs(locale = "en") {
+  const { data, headers } = await api.get("/funds/docs", {
+    params: { locale },
+    responseType: "blob",
+  });
+  const cd = headers["content-disposition"] || "";
+  const match = /filename="?([^";]+)"?/i.exec(cd);
+  const filename = match?.[1] || `funds-metrics-${locale}.pdf`;
+  const url = URL.createObjectURL(data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function listFunds({ q, page, page_size } = {}) {

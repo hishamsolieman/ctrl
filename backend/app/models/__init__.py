@@ -16,6 +16,7 @@ from app.models.sale_hold import SaleHold
 from app.models.print_profile import PrintProfile
 from app.models.expense import Expense
 from app.models.fund import Fund
+from app.models.document import AppDocument
 
 __all__ = [
     "Role",
@@ -41,4 +42,5 @@ __all__ = [
     "PrintProfile",
     "Expense",
     "Fund",
+    "AppDocument",
 ]
