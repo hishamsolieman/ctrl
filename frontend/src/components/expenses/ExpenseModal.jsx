@@ -7,9 +7,10 @@ import { createExpense, updateExpense } from "@/lib/expenses";
 const today = () => new Date().toISOString().slice(0, 10);
 
 function blank(meta) {
+  const types = meta?.types || [];
   return {
     user_id: meta?.self?.id ?? null,
-    type: meta?.types?.[0] || "rent",
+    type: types[0] || "fees",
     name: "",
     amount: "",
     spent_at: today(),

@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 # -----------------------------------------------------------------------------
 # Auth configuration is EMBEDDED in the backend (not read from .env), the same
@@ -17,17 +17,15 @@ JWT_ALGORITHM = "HS256"
 # Token lifetime: 1 year (per spec).
 JWT_EXPIRE_SECONDS = 365 * 24 * 60 * 60
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return pwd_context.verify(plain, hashed)
-    except ValueError:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
         return False
 
 
