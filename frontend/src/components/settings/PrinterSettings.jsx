@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
 import { useBrand } from "@/context/BrandContext";
+import { useAuth } from "@/context/AuthContext";
 import {
   listPrintProfiles,
   deletePrintProfile,
@@ -9,9 +10,11 @@ import {
   setPrintAssignment,
   listPrinters,
   logTestPrint,
-  runTestPrint,
+  getGeneralSettings,
+  printDocument,
   isDesktop,
 } from "@/lib/settings";
+import { sampleBarcodeHtml, sampleInvoiceHtml, sampleReportHtml } from "@/lib/printSamples";
 import PrintProfileModal from "@/components/settings/PrintProfileModal";
 import Modal from "@/components/Modal";
 import {
@@ -31,9 +34,10 @@ const TARGETS = [
 ];
 
 export default function PrinterSettings() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const toast = useToast();
   const brand = useBrand();
+  const { user } = useAuth();
 
   const [profiles, setProfiles] = useState([]);
   const [assignments, setAssignments] = useState({ barcode: null, invoice: null, report: null });
@@ -80,11 +84,14 @@ export default function PrinterSettings() {
   }, [profiles]);
 
   const sizeLabel = useCallback(
-    (p) =>
-      p.size_mode === "custom"
-        ? `${p.width}×${p.height} ${p.unit}`
-        : p.standard_size || "—",
-    []
+    (p) => {
+      if (p.size_mode === "custom") {
+        if (!(Number(p.height) > 0)) return `${p.width} ${p.unit} × ${t("settings.printer.roll")}`;
+        return `${p.width}×${p.height} ${p.unit}`;
+      }
+      return p.standard_size || "—";
+    },
+    [t]
   );
 
   async function onAssign(target, value) {
@@ -98,51 +105,20 @@ export default function PrinterSettings() {
     }
   }
 
-  function testHtml(target, profile) {
-    const head = `<div style="font-weight:700;font-size:14px">${brand?.name || "CTRL"}</div>`;
-    if (target === "barcode") {
-      return (
-        `${head}<div style="margin-top:6px;font-size:11px">${t("settings.printer.test.barcode")}</div>` +
-        `<div style="font-family:monospace;letter-spacing:2px;font-size:20px;margin-top:4px">ABC12345</div>` +
-        `<div style="height:32px;margin-top:4px;background:repeating-linear-gradient(90deg,#000 0 2px,#fff 2px 4px)"></div>` +
-        `<div style="font-family:monospace;text-align:center;margin-top:2px">ABC12345</div>`
-      );
-    }
-    if (target === "invoice") {
-      return (
-        `${head}<div style="margin-top:6px;font-size:11px">${t("settings.printer.test.invoice")}</div>` +
-        `<hr><div style="display:flex;justify-content:space-between"><span>Sample item ×1</span><span>100.00</span></div>` +
-        `<div style="display:flex;justify-content:space-between;font-weight:700;margin-top:4px"><span>Total</span><span>100.00</span></div>`
-      );
-    }
-    return (
-      `${head}<div style="margin-top:6px;font-size:11px">${t("settings.printer.test.report")}</div>` +
-      `<div style="margin-top:4px">${new Date().toLocaleString()}</div>` +
-      `<div>${t("settings.printer.test.sample")}</div>`
-    );
-  }
-
-  function testText(target, profile) {
-    const size =
-      profile.size_mode === "custom"
-        ? `${profile.width}x${profile.height} ${profile.unit}`
-        : profile.standard_size;
-    return (
-      `${brand?.name || "CTRL"}\n` +
-      `${t(`settings.printer.test.${target}`)}\n` +
-      `${t("settings.printer.modal.printer")}: ${profile.printer_name}\n` +
-      `${t("settings.printer.table.size")}: ${size}\n` +
-      `${new Date().toLocaleString()}\n` +
-      `${t("settings.printer.test.sample")}\n`
-    );
-  }
-
   async function onTest(target) {
     const profile = byId.get(assignments[target]);
     if (!profile) return;
     setTesting(target);
     try {
-      await runTestPrint(profile, target, testHtml(target, profile), testText(target, profile));
+      const general = await getGeneralSettings().catch(() => ({}));
+      const ctx = { t, i18n, brand, general, profile, user };
+      const body =
+        target === "barcode"
+          ? sampleBarcodeHtml({ ...ctx, isAr: i18n.resolvedLanguage === "ar", currency: general.currency })
+          : target === "invoice"
+            ? sampleInvoiceHtml(ctx)
+            : sampleReportHtml(ctx);
+      await printDocument(body);
       logTestPrint(target, profile.id).catch(() => {});
       toast.success(t("settings.printer.test.sent"));
     } catch {

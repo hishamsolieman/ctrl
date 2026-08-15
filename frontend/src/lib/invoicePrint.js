@@ -1,4 +1,4 @@
-import { pageRule } from "@/lib/barcode";
+import { pageRule, isInvoiceRoll, invoiceRollWidth } from "@/lib/barcode";
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -36,26 +36,34 @@ export function buildInvoiceHtml({ inv, brand, isAr, isCash, labels, profile, mo
     ? `<div class="cash">` +
       `<div class="row"><span>${esc(labels.paid)}</span><span>${esc(money(inv.paid))}</span></div>` +
       `<div class="row" style="font-weight:700"><span>${esc(labels.changeRaw)}</span><span>${esc(money(inv.changeRaw))}</span></div>` +
-      `<div class="row" style="font-size:10px;color:#666"><span>${esc(labels.changeExact)}</span><span>${esc(money(inv.changeExact))}</span></div>` +
       `</div>`
+    : "";
+
+  const roll = isInvoiceRoll(profile);
+  const rollW = roll ? invoiceRollWidth(profile) : null;
+  const widthCss = rollW ? `${rollW.value}${rollW.unit}` : "";
+  const rollAttrs = rollW
+    ? ` data-roll="1" data-roll-width="${rollW.value}" data-roll-unit="${rollW.unit}"`
     : "";
 
   const style =
     `<style>` +
-    pageRule(profile) +
+    (roll
+      ? `@page { margin: 0; }`
+      : pageRule(profile)) +
     `html,body{margin:0;padding:0;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;}` +
     `*{box-sizing:border-box;}` +
-    `.inv{font-family:'Poppins',system-ui,Arial,sans-serif;font-size:12px;padding:2mm;}` +
+    (widthCss ? `html,body,.inv{width:${widthCss};max-width:${widthCss};}` : "") +
+    `.inv{font-family:'Poppins',system-ui,Arial,sans-serif;font-size:12px;` +
+    `padding:2mm calc(2mm + 2.5%) calc(2mm + 10px);}` +
     `.hdr{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid #000;padding-bottom:8px;margin-bottom:8px;}` +
-    `.brand{display:flex;gap:8px;align-items:center;}` +
-    `.brand img{height:34px;width:34px;object-fit:contain;}` +
-    `.brand .nm{font-weight:800;font-size:15px;}` +
-    `.brand .mt{font-size:10px;color:#555;}` +
+    `.brand{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;}` +
+    `.brand img{height:36px;width:98px;object-fit:cover;object-position:center;}` +
+    `.brand .addr{font-size:8px;color:#555;line-height:1.35;max-width:98px;}` +
     `.meta{text-align:${isAr ? "start" : "end"};}` +
-    `.meta .tt{font-weight:700;letter-spacing:2px;font-size:10px;text-transform:uppercase;color:#111;}` +
-    `.meta .no{font-family:monospace;font-size:12px;}` +
-    `.meta .dt{font-size:10px;color:#555;}` +
-    `.badge{display:inline-block;border:1px solid #000;border-radius:10px;padding:0 6px;font-size:9px;font-weight:700;margin-top:2px;}` +
+    `.meta .tt{font-weight:700;letter-spacing:2px;font-size:8px;text-transform:uppercase;color:#111;}` +
+    `.meta .no{font-family:monospace;font-size:10px;}` +
+    `.meta .dt{font-size:8px;color:#555;}` +
     `.bill{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed #999;padding-bottom:8px;margin-bottom:8px;font-size:11px;}` +
     `.bill .lbl{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#666;}` +
     `.bill .v{font-weight:600;}` +
@@ -76,19 +84,19 @@ export function buildInvoiceHtml({ inv, brand, isAr, isCash, labels, profile, mo
 
   return (
     style +
-    `<div class="inv" dir="${dir}">` +
+    `<div class="inv" dir="${dir}"${rollAttrs}>` +
     `<div class="hdr">` +
-    `<div class="brand">${logo}<div><div class="nm">${esc(brand?.name || "")}</div>` +
-    `${brand?.motto ? `<div class="mt">${esc(brand.motto)}</div>` : ""}</div></div>` +
+    `<div class="brand">${logo}` +
+    `${brand?.address ? `<div class="addr">${esc(brand.address)}</div>` : ""}</div>` +
     `<div class="meta"><div class="tt">${esc(labels.title)}</div>` +
     `<div class="no" dir="ltr">${esc(inv.invoice_no || "")}</div>` +
-    `<div class="dt" dir="ltr">${esc(date)}</div>` +
-    `<div class="badge">${esc(labels.paidBadge)}</div></div>` +
+    `<div class="dt" dir="ltr">${esc(date)}</div></div>` +
     `</div>` +
     `<div class="bill">` +
     `<div><div class="lbl">${esc(labels.billTo)}</div>` +
     `<div class="v">${esc(inv.customer_name || "—")}</div>` +
-    `${inv.customer_phone ? `<div dir="ltr">${esc(inv.customer_phone)}</div>` : ""}</div>` +
+    `<div class="lbl" style="margin-top:6px">${esc(labels.sellerName)}</div>` +
+    `<div class="v">${esc(inv.seller_name || "—")}</div></div>` +
     `<div style="text-align:${isAr ? "start" : "end"}"><div class="lbl">${esc(labels.payment)}</div>` +
     `<div class="v">${esc(inv.payment_method || "—")}</div></div>` +
     `</div>` +

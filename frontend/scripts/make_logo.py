@@ -12,9 +12,12 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-OUT = Path(__file__).resolve().parents[1] / "src" / "assets" / "logo.png"
+ASSETS = Path(__file__).resolve().parents[1] / "src" / "assets"
+OUT = ASSETS / "logo.png"
+OUT_BLACK = ASSETS / "logo-black.png"
 ACCENT = (142, 255, 25, 255)  # #8EFF19
 WHITE = (255, 255, 255, 255)
+BLACK = (0, 0, 0, 255)
 
 W, H = 720, 240
 img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -53,6 +56,19 @@ draw.rounded_rectangle(
     [bar_x, bar_y, bar_x + bar_w, bar_y + 14], radius=7, fill=ACCENT
 )
 
-OUT.parent.mkdir(parents=True, exist_ok=True)
+ASSETS.mkdir(parents=True, exist_ok=True)
 img.save(OUT)
+
+# Same wordmark with white → black (for light / print backgrounds).
+black = img.copy()
+px = black.load()
+w, h = black.size
+for y in range(h):
+    for x in range(w):
+        r, g, b, a = px[x, y]
+        if a and r >= 230 and g >= 230 and b >= 230:
+            px[x, y] = BLACK
+black.save(OUT_BLACK)
+
 print(f"Wrote logo -> {OUT} ({img.size[0]}x{img.size[1]})")
+print(f"Wrote logo-black -> {OUT_BLACK}")

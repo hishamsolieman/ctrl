@@ -75,8 +75,10 @@ export default function PrintProfileModal({
     if (!form.printer_name.trim()) return toast.error(t("settings.printer.errors.printerRequired"));
     if (form.size_mode === "standard" && !form.standard_size)
       return toast.error(t("settings.printer.errors.sizeRequired"));
-    if (form.size_mode === "custom" && (!(Number(form.width) > 0) || !(Number(form.height) > 0)))
-      return toast.error(t("settings.printer.errors.sizeRequired"));
+    if (form.size_mode === "custom") {
+      if (!(Number(form.width) > 0) || form.height === "" || Number(form.height) < 0)
+        return toast.error(t("settings.printer.errors.sizeRequired"));
+    }
 
     const payload = {
       name: form.name.trim(),
@@ -187,9 +189,10 @@ export default function PrintProfileModal({
                 value={form.width} onChange={(e) => set("width", e.target.value)} />
             </div>
             <div>
-              <label className={labelCls}>{t("settings.printer.modal.height")} *</label>
+              <label className={labelCls}>{t("settings.printer.modal.height")}</label>
               <input type="number" min={0} step="0.1" className={inputCls} dir="ltr"
                 value={form.height} onChange={(e) => set("height", e.target.value)} />
+              <p className="mt-1 text-[11px] text-muted">{t("settings.printer.modal.heightHint")}</p>
             </div>
             <div>
               <label className={labelCls}>{t("settings.printer.modal.unit")}</label>

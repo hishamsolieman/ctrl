@@ -5,7 +5,8 @@ import { useToast } from "@/context/ToastContext";
 import { useBrand } from "@/context/BrandContext";
 import { businessReport } from "@/lib/dashboard";
 import { buildReportHtml } from "@/lib/reportPrint";
-import { getPrintTarget, printDocument } from "@/lib/settings";
+import { getPrintTarget, getGeneralSettings, printDocument } from "@/lib/settings";
+import { mediaUrl } from "@/lib/products";
 import { IconPrinter, IconCalendar, IconFileText } from "@/components/icons";
 
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -81,12 +82,16 @@ export default function ReportModal({ open, onClose }) {
     if (days <= 0) return toast.error(t("report.errors.range"));
     setBusy(true);
     try {
-      const data = await businessReport(from, to);
+      const [data, general] = await Promise.all([
+        businessReport(from, to),
+        getGeneralSettings().catch(() => ({})),
+      ]);
       const currency = data.currency || "";
       const withCcy = (n) => `${money(n)} ${currency}`.trim();
+      const logo = general.report_logo ? mediaUrl(general.report_logo) : brand.logo;
       const body = buildReportHtml({
         data,
-        brand,
+        brand: { ...brand, logo, address: general.branch_address || "" },
         isAr,
         t,
         profile,

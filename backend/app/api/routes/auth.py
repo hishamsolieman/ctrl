@@ -27,6 +27,19 @@ class ChangePasswordRequest(BaseModel):
     confirm_password: str = Field(min_length=1, max_length=200)
 
 
+class ProfileUpdate(BaseModel):
+    full_name: str | None = Field(default=None, max_length=150)
+    image_url: str | None = Field(default=None, max_length=512)
+
+
+def _parse_image_id(value: str | None) -> int | None:
+    """Accepts '/images/5', '5', etc. -> 5. Returns None when absent/invalid."""
+    if not value:
+        return None
+    tail = str(value).rstrip("/").split("/")[-1]
+    return int(tail) if tail.isdigit() else None
+
+
 def _user_out(user: User) -> UserOut:
     return UserOut(
         id=user.id,
@@ -75,6 +88,35 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     """Resolve the current user from the token (used by the SPA after login)."""
+    return _user_out(user)
+
+
+@router.put("/me", response_model=UserOut)
+def update_my_profile(
+    payload: ProfileUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Self-service profile: full name and avatar. Any authenticated role."""
+    changes: dict = {}
+    if payload.full_name is not None:
+        user.full_name = payload.full_name.strip() or None
+        changes["full_name"] = user.full_name
+    if payload.image_url is not None:
+        user.image_id = _parse_image_id(payload.image_url)
+        changes["image_id"] = user.image_id
+    db.commit()
+    db.refresh(user)
+    log_action(
+        db,
+        action="user.profile.update",
+        user_id=user.id,
+        entity="user",
+        entity_id=user.id,
+        details=changes,
+        request=request,
+    )
     return _user_out(user)
 
 

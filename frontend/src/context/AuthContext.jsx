@@ -57,6 +57,14 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  // Self-service profile (name + avatar). Refreshes the local user so the
+  // header avatar / name update immediately.
+  const updateProfile = useCallback(async ({ full_name, image_url }) => {
+    const { data } = await api.put("/auth/me", { full_name, image_url });
+    setUser(data);
+    return data;
+  }, []);
+
   // Persist the user's UI language to the DB and apply it immediately.
   const updateLocale = useCallback(async (locale) => {
     i18n.changeLanguage(locale); // instant UI feedback
@@ -88,6 +96,7 @@ export function AuthProvider({ children }) {
         login,
         logout,
         updateLocale,
+        updateProfile,
         changePassword,
       }}
     >

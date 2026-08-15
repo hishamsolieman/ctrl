@@ -322,7 +322,8 @@ export function buildReportHtml({
     `<div class="cv-brand">` +
     `${brand?.logo ? `<img src="${esc(brand.logo)}" alt="">` : ""}` +
     `<div><div class="cv-nm">${esc(brand?.name || "")}</div>` +
-    `${brand?.motto ? `<div class="cv-mt">${esc(brand.motto)}</div>` : ""}</div>` +
+    `${brand?.motto ? `<div class="cv-mt">${esc(brand.motto)}</div>` : ""}` +
+    `${brand?.address ? `<div class="cv-mt">${esc(brand.address)}</div>` : ""}</div>` +
     `</div>` +
     `<div class="cv-mid">` +
     `<div class="cv-kicker">${esc(t("report.cover.kicker"))}</div>` +

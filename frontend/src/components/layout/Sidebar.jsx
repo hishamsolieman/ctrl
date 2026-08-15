@@ -59,7 +59,7 @@ const NAV = [
   },
   { to: "/users", key: "nav.users", Icon: IconUsers, minLevel: 20 },
   { to: "/logs", key: "nav.logs", Icon: IconActivity, minLevel: 40 },
-  { to: "/settings", key: "nav.settings", Icon: IconSettings, minLevel: 30 },
+  { to: "/settings", key: "nav.settings", Icon: IconSettings },
 ];
 
 const linkBase =

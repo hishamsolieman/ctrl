@@ -1,6 +1,25 @@
 import api from "@/lib/api";
 
 // ---------------------------------------------------------------------------
+// General settings (GET any role; PUT Admin+)
+// ---------------------------------------------------------------------------
+export async function getGeneralSettings() {
+  const { data } = await api.get("/settings/general");
+  return data;
+}
+
+export async function updateGeneralSettings(payload) {
+  const { data } = await api.put("/settings/general", payload);
+  return data;
+}
+
+// "auto" follows the current UI language; otherwise force en/ar on invoices.
+export function resolveInvoiceLanguage(setting, uiLang) {
+  if (setting === "en" || setting === "ar") return setting;
+  return uiLang === "ar" ? "ar" : "en";
+}
+
+// ---------------------------------------------------------------------------
 // Print profiles + assignments API (Admin+ enforced server-side)
 // ---------------------------------------------------------------------------
 export async function listPrintProfiles() {
@@ -74,7 +93,8 @@ export async function listPrinters() {
 // Convert a profile's size to CSS `@page` size for the browser print fallback.
 function pageSize(profile) {
   if (!profile) return "auto";
-  if (profile.size_mode === "custom" && profile.width && profile.height) {
+  if (profile.size_mode === "custom" && Number(profile.width) > 0) {
+    if (!(Number(profile.height) > 0)) return `${profile.width}${profile.unit} auto`;
     return `${profile.width}${profile.unit} ${profile.height}${profile.unit}`;
   }
   return profile.standard_size || "auto";
@@ -116,28 +136,83 @@ export async function runTestPrint(profile, target, html, text) {
   done();
 }
 
+function waitForImages(doc) {
+  const imgs = [...doc.images];
+  if (!imgs.length) return Promise.resolve();
+  return Promise.all(
+    imgs.map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise((res) => {
+        img.onload = img.onerror = () => res();
+      });
+    })
+  );
+}
+
+function cssLenToPx(value, unit, win) {
+  const probe = win.document.createElement("div");
+  probe.style.cssText = `position:absolute;width:${value}${unit};visibility:hidden;`;
+  win.document.body.appendChild(probe);
+  const px = probe.getBoundingClientRect().width;
+  probe.remove();
+  if (px > 0) return px;
+  const n = Number(value) || 0;
+  if (unit === "in") return n * 96;
+  if (unit === "cm") return n * (96 / 2.54);
+  return n * (96 / 25.4);
+}
+
 // Print a full body string (caller supplies its own <style>/@page) via a hidden
 // iframe. Works in the browser and inside the Tauri webview (native dialog,
-// pre-select the assigned device). Waits a beat so inline SVG/images lay out.
+// pre-select the assigned device).
+//
+// Roll invoices (`[data-roll="1"]`): the iframe is laid out at the profile
+// width, then `@page` is set to that width × the measured content height so
+// the printed page is exactly as tall as the receipt.
 export function printDocument(bodyHtml) {
   return new Promise((resolve) => {
     const frame = document.createElement("iframe");
-    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    frame.style.cssText = "position:fixed;left:-12000px;top:0;border:0;visibility:hidden;";
     document.body.appendChild(frame);
     const doc = frame.contentWindow.document;
     doc.open();
     doc.write(`<!doctype html><html><head><meta charset="utf-8"></head><body>${bodyHtml}</body></html>`);
     doc.close();
+
     const cleanup = () => {
       setTimeout(() => frame.remove(), 1000);
       resolve();
     };
     frame.contentWindow.onafterprint = cleanup;
-    setTimeout(() => {
+
+    const go = async () => {
+      const roll = doc.querySelector("[data-roll='1']");
+      if (roll) {
+        const width = roll.getAttribute("data-roll-width");
+        const unit = roll.getAttribute("data-roll-unit") || "mm";
+        const widthPx = cssLenToPx(width, unit, frame.contentWindow);
+        frame.style.width = `${Math.ceil(widthPx)}px`;
+        frame.style.height = "20000px";
+        await waitForImages(doc);
+        const hPx = Math.ceil(roll.scrollHeight || roll.getBoundingClientRect().height);
+        const hMm = Math.ceil((hPx * 25.4) / 96 * 10) / 10;
+        const page = doc.createElement("style");
+        page.textContent =
+          `@page { size: ${width}${unit} ${hMm}mm; margin: 0; }` +
+          `html,body{width:${width}${unit};height:${hMm}mm;overflow:hidden;}`;
+        doc.head.appendChild(page);
+      } else {
+        frame.style.width = "0";
+        frame.style.height = "0";
+        await waitForImages(doc);
+      }
       frame.contentWindow.focus();
       frame.contentWindow.print();
-      // Fallback in case onafterprint never fires (some engines).
       setTimeout(cleanup, 1500);
-    }, 350);
+    };
+
+    setTimeout(() => {
+      go().catch(cleanup);
+    }, 80);
   });
 }

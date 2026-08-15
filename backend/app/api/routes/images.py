@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_role
+from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.image import Image
 from app.models.user import User
@@ -51,7 +51,7 @@ def _max_b64_len(db: Session) -> int:
 async def upload_image(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_role("Moderator")),
+    _user: User = Depends(get_current_user),
 ):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED:

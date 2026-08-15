@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
 import { useBrand } from "@/context/BrandContext";
+import { useAuth } from "@/context/AuthContext";
 import { posScan, posSetQty, posSwitch, posRelease, posCheckout, lookupCustomer } from "@/lib/pos";
 import { mapCartLine } from "@/lib/carts";
 import { mediaUrl } from "@/lib/products";
-import { getPrintTarget, printDocument } from "@/lib/settings";
+import { getPrintTarget, getGeneralSettings, printDocument, resolveInvoiceLanguage } from "@/lib/settings";
 import { buildInvoiceHtml } from "@/lib/invoicePrint";
 import {
   IconSearch,
@@ -64,11 +65,16 @@ function StatCard({ Icon, label, value, tone }) {
 }
 
 // Map a committed sale (checkout response) into the invoice view/print model.
-function saleToInvoiceModel(sale, isAr) {
+function firstNameOf(fullName) {
+  return String(fullName || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+}
+
+function saleToInvoiceModel(sale, isAr, sellerName) {
   return {
     invoice_no: sale.invoice_no,
     created_at: sale.created_at,
     customer_name: sale.customer_name,
+    seller_name: sale.seller_name || sellerName || "",
     customer_phone: sale.customer_phone,
     payment_method: isAr ? sale.payment_method_ar : sale.payment_method_en,
     items: (sale.items || []).map((i) => {
@@ -95,6 +101,8 @@ export default function CartWorkspace({ tab, boot, patch }) {
   const isAr = i18n.resolvedLanguage === "ar";
   const toast = useToast();
   const brand = useBrand();
+  const { user } = useAuth();
+  const sellerName = firstNameOf(user?.full_name);
 
   const currency = boot?.currency || "";
   const methods = boot?.payment_methods || [];
@@ -414,27 +422,41 @@ export default function CartWorkspace({ tab, boot, patch }) {
   // Printing". With no assigned profile, the OS default printer/paper is used.
   async function autoPrintInvoice(sale) {
     try {
-      const { profile } = await getPrintTarget("invoice").catch(() => ({ profile: null }));
+      const [{ profile }, general] = await Promise.all([
+        getPrintTarget("invoice").catch(() => ({ profile: null })),
+        getGeneralSettings().catch(() => ({})),
+      ]);
+      const invLang = resolveInvoiceLanguage(general.invoice_language, i18n.resolvedLanguage);
+      const invIsAr = invLang === "ar";
+      const tInv = i18n.getFixedT(invLang);
       const labels = {
-        title: t("pos.invoice.title"),
-        paidBadge: t("pos.invoice.paidBadge"),
-        billTo: t("pos.invoice.billTo"),
-        payment: t("pos.invoice.payment"),
-        item: t("pos.invoice.item"),
-        qty: t("pos.table.qty"),
-        price: t("pos.table.price"),
-        total: t("pos.table.total"),
-        subtotal: t("pos.invoice.subtotal"),
-        discount: t("pos.stats.discount"),
-        totalLabel: t("pos.stats.total"),
-        paid: t("pos.payment.paid"),
-        changeRaw: t("pos.payment.changeRaw"),
-        changeExact: t("pos.payment.changeExact"),
-        thanks: t("pos.invoice.thanks"),
+        title: tInv("pos.invoice.title"),
+        paidBadge: tInv("pos.invoice.paidBadge"),
+        billTo: tInv("pos.invoice.billTo"),
+        sellerName: tInv("pos.invoice.sellerName"),
+        payment: tInv("pos.invoice.payment"),
+        item: tInv("pos.invoice.item"),
+        qty: tInv("pos.table.qty"),
+        price: tInv("pos.table.price"),
+        total: tInv("pos.table.total"),
+        subtotal: tInv("pos.invoice.subtotal"),
+        discount: tInv("pos.stats.discount"),
+        totalLabel: tInv("pos.stats.total"),
+        paid: tInv("pos.payment.paid"),
+        changeRaw: tInv("pos.payment.changeRaw"),
+        changeExact: tInv("pos.payment.changeExact"),
+        thanks: tInv("pos.invoice.thanks"),
       };
+      const logo = general.invoice_logo ? mediaUrl(general.invoice_logo) : brand.logo;
       const body = buildInvoiceHtml({
-        inv: saleToInvoiceModel(sale, isAr),
-        brand, isAr, isCash, labels, profile, money, num2,
+        inv: saleToInvoiceModel(sale, invIsAr, sellerName),
+        brand: { ...brand, logo, address: general.branch_address || "" },
+        isAr: invIsAr,
+        isCash,
+        labels,
+        profile,
+        money,
+        num2,
       });
       await printDocument(body);
     } catch {
@@ -514,11 +536,12 @@ export default function CartWorkspace({ tab, boot, patch }) {
 
   const committed = !!tab.sale;
   const inv = committed
-    ? saleToInvoiceModel(tab.sale, isAr)
+    ? saleToInvoiceModel(tab.sale, isAr, sellerName)
     : {
         invoice_no: null,
         created_at: new Date().toISOString(),
         customer_name: tab.customer.name,
+        seller_name: sellerName,
         customer_phone: normalizePhone(tab.customer.phone),
         payment_method: selectedMethod ? (isAr ? selectedMethod.name_ar : selectedMethod.name_en) : "",
         items: items.map((i) => ({
@@ -1038,11 +1061,6 @@ export default function CartWorkspace({ tab, boot, patch }) {
                       ? new Date(inv.created_at).toLocaleString(isAr ? "ar-EG" : "en-US")
                       : "—"}
                   </p>
-                  {committed && (
-                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                      <IconCheck width={12} height={12} /> {t("pos.invoice.paidBadge")}
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -1053,9 +1071,10 @@ export default function CartWorkspace({ tab, boot, patch }) {
                     {t("pos.invoice.billTo")}
                   </p>
                   <p className="font-semibold text-text">{inv.customer_name || "—"}</p>
-                  {inv.customer_phone && (
-                    <p className="text-muted" dir="ltr">{inv.customer_phone}</p>
-                  )}
+                  <p className="mt-3 mb-1 text-xs uppercase tracking-widest text-muted">
+                    {t("pos.invoice.sellerName")}
+                  </p>
+                  <p className="font-semibold text-text">{inv.seller_name || "—"}</p>
                 </div>
                 <div className="text-end">
                   <p className="mb-1 text-xs uppercase tracking-widest text-muted">
@@ -1133,10 +1152,6 @@ export default function CartWorkspace({ tab, boot, patch }) {
                       <div className="flex items-center justify-between font-semibold text-accent">
                         <span>{t("pos.payment.changeRaw")}</span>
                         <span>{money(inv.changeRaw)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-muted">
-                        <span>{t("pos.payment.changeExact")}</span>
-                        <span>{money(inv.changeExact)}</span>
                       </div>
                     </div>
                   )}

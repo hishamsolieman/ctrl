@@ -21,11 +21,38 @@ const CSS_PAGE_NAMES = new Set(["A4", "A5", "A6", "Letter"]);
 
 const DEFAULT_PROFILE = { size_mode: "custom", width: 50, height: 30, unit: "mm" };
 
+// Custom height 0 (or omitted) = continuous thermal roll. Width still applies.
+export function isRollProfile(profile) {
+  if (!profile || profile.size_mode !== "custom") return false;
+  return Number(profile.width) > 0 && !(Number(profile.height) > 0);
+}
+
+// Invoice-only: roll when height is 0, or when the named size is a thermal roll.
+export function isInvoiceRoll(profile) {
+  if (!profile) return false;
+  if (isRollProfile(profile)) return true;
+  const s = profile.standard_size;
+  return profile.size_mode === "standard" && (s === "80mm" || s === "58mm");
+}
+
+// Physical width of an invoice roll (profile width, or 80/58mm named sizes).
+export function invoiceRollWidth(profile) {
+  if (!profile) return null;
+  if (profile.size_mode === "custom" && Number(profile.width) > 0) {
+    return { value: Number(profile.width), unit: profile.unit || "mm" };
+  }
+  if (profile.standard_size === "80mm") return { value: 80, unit: "mm" };
+  if (profile.standard_size === "58mm") return { value: 58, unit: "mm" };
+  return null;
+}
+
 // Page dimensions in mm for any profile shape.
 function dimsMm(profile) {
   const p = profile || DEFAULT_PROFILE;
-  if (p.size_mode === "custom" && p.width && p.height) {
-    return [toMm(p.width, p.unit), toMm(p.height, p.unit)];
+  if (p.size_mode === "custom" && Number(p.width) > 0) {
+    const w = toMm(p.width, p.unit);
+    const h = Number(p.height) > 0 ? toMm(p.height, p.unit) : w * 1.5;
+    return [w, h];
   }
   return STANDARD_MM[p.standard_size] || STANDARD_MM.A6;
 }
@@ -42,9 +69,17 @@ export function marginMm(profile) {
 }
 
 // CSS `@page { size: ... }` value for the profile.
-function pageSizeCss(profile) {
+// `roll: true` uses width only — length follows the content (thermal receipt).
+function pageSizeCss(profile, { roll } = {}) {
   const p = profile || DEFAULT_PROFILE;
-  if (p.size_mode === "custom" && p.width && p.height) {
+  const useRoll = roll || isRollProfile(p);
+  if (useRoll) {
+    if (p.size_mode === "custom" && Number(p.width) > 0) return `${p.width}${p.unit} auto`;
+    if (p.standard_size === "80mm" || p.standard_size === "58mm") return `${p.standard_size} auto`;
+    const [w] = dimsMm(p);
+    return `${w}mm auto`;
+  }
+  if (p.size_mode === "custom" && Number(p.width) > 0 && Number(p.height) > 0) {
     return `${p.width}${p.unit} ${p.height}${p.unit}`;
   }
   if (CSS_PAGE_NAMES.has(p.standard_size)) return p.standard_size;
@@ -54,10 +89,11 @@ function pageSizeCss(profile) {
 
 // CSS `@page` rule for a profile. With no profile, only a sensible margin is
 // set so the OS uses the default printer's default paper size.
-export function pageRule(profile) {
+export function pageRule(profile, opts = {}) {
   if (!profile) return "@page { margin: 8mm; }";
-  const m = marginMm(profile);
-  return `@page { size: ${pageSizeCss(profile)}; margin: ${m.toFixed(2)}mm; }`;
+  const useRoll = opts.roll || isRollProfile(profile);
+  const m = useRoll ? 2 : marginMm(profile);
+  return `@page { size: ${pageSizeCss(profile, { roll: useRoll })}; margin: ${m.toFixed(2)}mm; }`;
 }
 
 function fitFontPx(availablePx, text, maxPx, minPx = 6) {

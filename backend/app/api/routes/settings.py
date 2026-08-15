@@ -1,11 +1,16 @@
-"""Application settings — Admin+ only.
+"""Application settings.
 
-Currently exposes the *Printer* settings: CRUD for print profiles (printer +
-paper size) and the assignment of a profile to each print target
-(barcode / invoice / report). Assignments live in the key/value ``settings``
-table so they're trivially extensible. Every mutation is logged.
+*General* (branch, logos, currency, phone regex, invoice language) — readable
+by any authenticated user (POS/report print need the logos + language);
+writable by Admin+.
+
+*Printer* — CRUD for print profiles and the assignment of a profile to each
+print target (barcode / invoice / report). Assignments live in the key/value
+``settings`` table. Every mutation is logged.
 """
 from __future__ import annotations
+
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -17,7 +22,19 @@ from app.core.database import get_db
 from app.models.print_profile import PrintProfile
 from app.models.user import User
 from app.services.logging import log_action
-from app.services.settings import get_setting, set_setting
+from app.services.settings import (
+    BRANCH_ADDRESS_KEY,
+    CURRENCY_KEY,
+    INVOICE_LANGUAGE_KEY,
+    INVOICE_LANGUAGES,
+    INVOICE_LOGO_KEY,
+    PHONE_REGEX_KEY,
+    REPORT_LOGO_KEY,
+    get_general_settings,
+    get_setting,
+    set_setting,
+    set_settings,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -52,6 +69,15 @@ class TestIn(BaseModel):
     profile_id: int
 
 
+class GeneralIn(BaseModel):
+    branch_address: str = ""
+    report_logo: str = ""
+    invoice_logo: str = ""
+    customer_phone_regex: str = Field(min_length=1, max_length=255)
+    currency: str = Field(min_length=1, max_length=10)
+    invoice_language: str = "auto"
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -76,8 +102,10 @@ def _validate(payload: ProfileIn) -> None:
     if payload.size_mode == "standard":
         if not (payload.standard_size or "").strip():
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "settings.printer.errors.sizeRequired")
-    else:  # custom
-        if not payload.width or not payload.height or payload.width <= 0 or payload.height <= 0:
+    else:  # custom — height 0 means a thermal roll (width-only, used by invoices)
+        if not payload.width or payload.width <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "settings.printer.errors.sizeRequired")
+        if payload.height is None or payload.height < 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "settings.printer.errors.sizeRequired")
 
 
@@ -94,6 +122,59 @@ def _assignments(db: Session) -> dict[str, int | None]:
         raw = get_setting(db, key, "")
         out[t] = int(raw) if raw.isdigit() else None
     return out
+
+
+# --------------------------------------------------------------------------- #
+# General
+# --------------------------------------------------------------------------- #
+@router.get("/general")
+def read_general(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
+    """Branch, logos, currency, phone regex, invoice language.
+
+    Any authenticated role — cashiers need this when printing invoices.
+    """
+    return get_general_settings(db)
+
+
+@router.put("/general")
+def update_general(
+    payload: GeneralIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_role("Admin")),
+):
+    regex = (payload.customer_phone_regex or "").strip()
+    try:
+        re.compile(regex)
+    except re.error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "settings.general.errors.badRegex")
+
+    lang = (payload.invoice_language or "auto").strip().lower()
+    if lang not in INVOICE_LANGUAGES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "settings.general.errors.badLanguage")
+
+    currency = (payload.currency or "").strip()
+    if not currency:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "settings.general.errors.currencyRequired")
+
+    values = {
+        BRANCH_ADDRESS_KEY: (payload.branch_address or "").strip(),
+        REPORT_LOGO_KEY: (payload.report_logo or "").strip(),
+        INVOICE_LOGO_KEY: (payload.invoice_logo or "").strip(),
+        PHONE_REGEX_KEY: regex,
+        CURRENCY_KEY: currency,
+        INVOICE_LANGUAGE_KEY: lang,
+    }
+    set_settings(db, values)
+    log_action(
+        db,
+        action="settings.general.update",
+        user_id=actor.id,
+        entity="settings",
+        details=values,
+        request=request,
+    )
+    return get_general_settings(db)
 
 
 # --------------------------------------------------------------------------- #
