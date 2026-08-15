@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
   listCategories,
@@ -30,11 +32,14 @@ import {
 } from "@/components/icons";
 
 const PAGE_SIZE = 8;
+const MODERATOR_LEVEL = 20;
 
 export default function ProductCategories() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const { user } = useAuth();
   const toast = useToast();
+  const canAccess = (user?.role_level ?? 0) >= MODERATOR_LEVEL;
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,8 +67,8 @@ export default function ProductCategories() {
   }, [t, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (canAccess) load();
+  }, [load, canAccess]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -174,6 +179,8 @@ export default function ProductCategories() {
   const toolbarBtn = "ctrl-btn border border-border px-3 py-2 text-sm text-text hover:bg-elevated";
   const iconBtn =
     "flex h-8 w-8 items-center justify-center rounded-full bg-bg/80 text-text backdrop-blur transition hover:bg-accent hover:text-black";
+
+  if (!canAccess) return <Navigate to="/products/list" replace />;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
