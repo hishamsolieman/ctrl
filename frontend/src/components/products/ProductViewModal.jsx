@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import Modal from "@/components/Modal";
+import { useAuth } from "@/context/AuthContext";
 import { mediaUrl } from "@/lib/products";
 import { IconImage } from "@/components/icons";
 
@@ -12,7 +13,9 @@ function formatPrice(v) {
 
 export default function ProductViewModal({ open, product, attributes, currency, onClose }) {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const isAr = i18n.resolvedLanguage === "ar";
+  const canSeeCost = (user?.role_level ?? 0) >= 20;
   if (!product) return null;
 
   const attrById = Object.fromEntries((attributes || []).map((a) => [a.id, a]));
@@ -92,11 +95,11 @@ export default function ProductViewModal({ open, product, attributes, currency, 
         </div>
 
         {/* Prices */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className={`grid gap-3 ${canSeeCost ? "grid-cols-3" : "grid-cols-2"}`}>
           {[
             ["detail.price", product.price],
             ["detail.minPrice", product.min_price],
-            ["detail.supplierPrice", product.supplier_price],
+            ...(canSeeCost ? [["detail.supplierPrice", product.supplier_price]] : []),
           ].map(([k, v]) => (
             <div key={k} className="rounded-lg border border-border bg-elevated px-3 py-2">
               <p className="text-[11px] text-muted">{t(`products.${k}`)}</p>

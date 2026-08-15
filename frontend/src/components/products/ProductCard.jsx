@@ -17,7 +17,19 @@ function formatPrice(v) {
   });
 }
 
-export default function ProductCard({ product, currency, selected, onToggleSelect, onView, onEdit, onCopy, onDelete, onAddToCart }) {
+export default function ProductCard({
+  product,
+  currency,
+  selected,
+  canSelect = true,
+  canMutate = true,
+  onToggleSelect,
+  onView,
+  onEdit,
+  onCopy,
+  onDelete,
+  onAddToCart,
+}) {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const images = product.images || [];
@@ -72,15 +84,16 @@ export default function ProductCard({ product, currency, selected, onToggleSelec
           </div>
         )}
 
-        {/* Select checkbox — top-left (matches product categories) */}
-        <label className="absolute start-3 top-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={!!selected}
-            onChange={() => onToggleSelect?.(product)}
-            className="h-5 w-5 cursor-pointer rounded-md border-0 bg-white/90 shadow-md ring-1 ring-black/10 accent-accent"
-          />
-        </label>
+        {canSelect && (
+          <label className="absolute start-3 top-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onChange={() => onToggleSelect?.(product)}
+              className="h-5 w-5 cursor-pointer rounded-md border-0 bg-white/90 shadow-md ring-1 ring-black/10 accent-accent"
+            />
+          </label>
+        )}
 
         {/* Stock status — bottom-left */}
         <span
@@ -107,19 +120,23 @@ export default function ProductCard({ product, currency, selected, onToggleSelec
             onClick={() => onView?.(product)}>
             <IconEye width={15} height={15} />
           </button>
-          <button type="button" title={t("products.edit")} className={iconBtn}
-            onClick={() => onEdit?.(product)}>
-            <IconEdit width={15} height={15} />
-          </button>
-          <button type="button" title={t("products.copy")} className={iconBtn}
-            onClick={() => onCopy?.(product)}>
-            <IconCopy width={15} height={15} />
-          </button>
-          <button type="button" title={t("products.delete")}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-bg/80 text-red-400 backdrop-blur transition hover:bg-red-500 hover:text-white"
-            onClick={() => onDelete?.(product)}>
-            <IconTrash width={15} height={15} />
-          </button>
+          {canMutate && (
+            <>
+              <button type="button" title={t("products.edit")} className={iconBtn}
+                onClick={() => onEdit?.(product)}>
+                <IconEdit width={15} height={15} />
+              </button>
+              <button type="button" title={t("products.copy")} className={iconBtn}
+                onClick={() => onCopy?.(product)}>
+                <IconCopy width={15} height={15} />
+              </button>
+              <button type="button" title={t("products.delete")}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-bg/80 text-red-400 backdrop-blur transition hover:bg-red-500 hover:text-white"
+                onClick={() => onDelete?.(product)}>
+                <IconTrash width={15} height={15} />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Carousel dots */}

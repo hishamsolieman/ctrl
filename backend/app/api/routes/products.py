@@ -22,6 +22,7 @@ from app.core.database import get_db
 from app.models.attribute import Attribute, AttributeValue
 from app.models.category import Category
 from app.models.product import Product, ProductImage, ProductVariant, VariantStock
+from app.models.sale import SaleItem
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.schemas.product import ProductInput, ProductOut, VariantInput
@@ -102,7 +103,11 @@ def _image_url(ref: Any) -> str:
     return s
 
 
-def _serialize(product: Product) -> dict[str, Any]:
+def _can_see_cost(user: User) -> bool:
+    return bool(user.role and user.role.level >= 20)
+
+
+def _serialize(product: Product, *, include_cost: bool = True) -> dict[str, Any]:
     variants = _live_variants(product)
     images: list[dict] = []
     for v in variants:
@@ -110,7 +115,7 @@ def _serialize(product: Product) -> dict[str, Any]:
     # Fallback: if the product has no images, use its category's image.
     if not images and product.category and product.category.image_id:
         images = [{"id": 0, "url": f"/images/{product.category.image_id}"}]
-    return {
+    data = {
         "id": product.id,
         "code": product.code,
         "name": product.name,
@@ -120,7 +125,6 @@ def _serialize(product: Product) -> dict[str, Any]:
         "category_name_ar": product.category.name_ar if product.category else None,
         "supplier_id": product.supplier_id,
         "supplier_name": product.supplier.name if product.supplier else None,
-        "supplier_price": float(product.supplier_price or 0),
         "min_price": float(product.min_price or 0),
         "price": float(product.price or 0),
         "note": product.note,
@@ -144,6 +148,9 @@ def _serialize(product: Product) -> dict[str, Any]:
         "images": images,
         "created_at": product.created_at,
     }
+    if include_cost:
+        data["supplier_price"] = float(product.supplier_price or 0)
+    return data
 
 
 def _matches_search(product: Product, q: str) -> bool:
@@ -322,7 +329,18 @@ def list_products(
         rows.sort(key=lambda p: float(p.price or 0))
     elif sort == "price_desc":
         rows.sort(key=lambda p: float(p.price or 0), reverse=True)
-    else:  # newest / popular
+    elif sort == "popular":
+        sold_map = dict(
+            db.query(SaleItem.product_id, func.coalesce(func.sum(SaleItem.quantity), 0))
+            .filter(SaleItem.product_id.isnot(None))
+            .group_by(SaleItem.product_id)
+            .all()
+        )
+        rows.sort(
+            key=lambda p: (int(sold_map.get(p.id) or 0), p.created_at or datetime.min, p.id),
+            reverse=True,
+        )
+    else:  # newest
         rows.sort(key=lambda p: (p.created_at or datetime.min, p.id), reverse=True)
 
     total = len(rows)
@@ -330,7 +348,7 @@ def list_products(
     page_rows = rows[start : start + page_size]
 
     return {
-        "items": [_serialize(p) for p in page_rows],
+        "items": [_serialize(p, include_cost=_can_see_cost(_user)) for p in page_rows],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -484,7 +502,7 @@ def get_product(
     )
     if not product:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
-    return _serialize(product)
+    return _serialize(product, include_cost=_can_see_cost(_user))
 
 
 # --------------------------------------------------------------------------- #
@@ -909,6 +927,14 @@ def bulk_delete_products(
     user: User = Depends(require_role("Moderator")),
 ):
     """Soft-delete the selected products (never a physical delete)."""
+    level = user.role.level if user.role else 0
+    live_ids = {
+        pid
+        for (pid,) in db.query(Product.id).filter(Product.is_deleted.is_(False)).all()
+    }
+    # Moderators cannot wipe the catalog in one shot (that's Clear all).
+    if level < 30 and live_ids and set(payload.ids) >= live_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "products.bulk.noDeleteAll")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows = (
         db.query(Product)

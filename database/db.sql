@@ -567,6 +567,8 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'products.bulk.hint', 'en', 'Enable a field to apply its value to every selected product.'),
   ('ui', 'products.bulk.noFields', 'ar', 'فعّل حقلاً واحدًا على الأقل للتحديث.'),
   ('ui', 'products.bulk.noFields', 'en', 'Enable at least one field to update.'),
+  ('ui', 'products.bulk.noDeleteAll', 'en', 'Select all cannot be deleted. Clear the selection first.'),
+  ('ui', 'products.bulk.noDeleteAll', 'ar', 'لا يمكن الحذف عند تحديد الكل. ألغِ التحديد أولاً.'),
   ('ui', 'products.bulk.title', 'ar', 'تعديل {{count}} منتج'),
   ('ui', 'products.bulk.title', 'en', 'Edit {{count}} products'),
   ('ui', 'products.bulk.updated', 'ar', 'تم تحديث {{count}} منتج.'),

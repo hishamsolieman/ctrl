@@ -14,6 +14,8 @@ export default function ProductTable({
   currency,
   selected,
   pageAllSelected,
+  canSelect = true,
+  canMutate = true,
   onToggleSelect,
   onToggleSelectAll,
   onView,
@@ -33,9 +35,11 @@ export default function ProductTable({
     <table className="ctrl-table h-full w-full border-collapse text-sm">
       <thead className="sticky top-0 z-10 bg-surface">
         <tr className="h-px border-b border-border text-xs uppercase tracking-wide text-muted">
-          <th className="w-10 px-3 py-3">
-            <input type="checkbox" className="ctrl-check" checked={pageAllSelected} onChange={onToggleSelectAll} />
-          </th>
+          {canSelect && (
+            <th className="w-10 px-3 py-3">
+              <input type="checkbox" className="ctrl-check" checked={pageAllSelected} onChange={onToggleSelectAll} />
+            </th>
+          )}
           <th className="w-14 px-3 py-3" />
           <th className="px-3 py-3 text-start font-medium">{t("products.table.code")}</th>
           <th className="px-3 py-3 text-start font-medium">{t("products.table.name")}</th>
@@ -53,10 +57,12 @@ export default function ProductTable({
           const inStock = Number(p.quantity || 0) > 0;
           return (
             <tr key={p.id} className="border-b border-border/60 transition hover:bg-elevated/40">
-              <td className="px-3 py-2.5">
-                <input type="checkbox" className="ctrl-check" checked={!!selected[p.id]}
-                  onChange={() => onToggleSelect?.(p)} />
-              </td>
+              {canSelect && (
+                <td className="px-3 py-2.5">
+                  <input type="checkbox" className="ctrl-check" checked={!!selected[p.id]}
+                    onChange={() => onToggleSelect?.(p)} />
+                </td>
+              )}
               <td className="px-3 py-2.5">
                 <div className="h-10 w-10 overflow-hidden rounded-lg border border-border bg-elevated">
                   {img ? (
@@ -94,17 +100,21 @@ export default function ProductTable({
                   <button title={t("products.viewAction")} className={iconBtn} onClick={() => onView?.(p)}>
                     <IconEye width={15} height={15} />
                   </button>
-                  <button title={t("products.edit")} className={iconBtn} onClick={() => onEdit?.(p)}>
-                    <IconEdit width={15} height={15} />
-                  </button>
-                  <button title={t("products.copy")} className={iconBtn} onClick={() => onCopy?.(p)}>
-                    <IconCopy width={15} height={15} />
-                  </button>
-                  <button title={t("products.delete")}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/40 text-red-400 transition hover:bg-red-500 hover:text-white"
-                    onClick={() => onDelete?.(p)}>
-                    <IconTrash width={15} height={15} />
-                  </button>
+                  {canMutate && (
+                    <>
+                      <button title={t("products.edit")} className={iconBtn} onClick={() => onEdit?.(p)}>
+                        <IconEdit width={15} height={15} />
+                      </button>
+                      <button title={t("products.copy")} className={iconBtn} onClick={() => onCopy?.(p)}>
+                        <IconCopy width={15} height={15} />
+                      </button>
+                      <button title={t("products.delete")}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/40 text-red-400 transition hover:bg-red-500 hover:text-white"
+                        onClick={() => onDelete?.(p)}>
+                        <IconTrash width={15} height={15} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </td>
             </tr>

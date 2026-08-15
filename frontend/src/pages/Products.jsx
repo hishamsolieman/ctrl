@@ -46,31 +46,16 @@ import {
 } from "@/components/icons";
 
 const PAGE_SIZE = 8;
+const MODERATOR_LEVEL = 20;
+const ADMIN_LEVEL = 30;
 
-function pad(n) {
-  return String(n).padStart(2, "0");
-}
-function toLocalInput(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
-}
-// End of the current local day ("today 23:59") — the default upper date bound.
-function endOfTodayInput() {
-  const n = new Date();
-  return toLocalInput(new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59));
-}
 function makeDefaultFilters() {
-  const now = new Date();
   return {
     q: "",
     stock: "all",
     categoryIds: [],
-    // Default range: first day of the current year -> end of today.
-    // Use end-of-day (not the current instant) so products created moments
-    // ago — e.g. while the add-product form was open — stay within range.
-    dateFrom: toLocalInput(new Date(now.getFullYear(), 0, 1, 0, 0)),
-    dateTo: endOfTodayInput(),
+    dateFrom: "",
+    dateTo: "",
     sort: "newest",
     priceMin: null,
     priceMax: null,
@@ -83,6 +68,9 @@ export default function Products() {
   const isAr = i18n.resolvedLanguage === "ar";
   const toast = useToast();
   const { user } = useAuth();
+  const level = user?.role_level ?? 0;
+  const canMutate = level >= MODERATOR_LEVEL;
+  const canClearAll = level >= ADMIN_LEVEL;
 
   // Grid/table preference is remembered per user, in the browser.
   const viewKey = user?.username ? `ctrl.products.view.${user.username}` : null;
@@ -190,14 +178,8 @@ export default function Products() {
     toast.info(t("products.cleared"));
   }
 
-  // Called after a product is created/edited. A product created just now can be
-  // hidden by a "To" date bound that was pinned earlier in the session, so widen
-  // it to end-of-today and (for new products) jump to the first page — where the
-  // newest item sorts. Changing filters/page also re-triggers the fetch effect.
   const handleSaved = useCallback(
     (savedMode) => {
-      const end = endOfTodayInput();
-      setFilters((f) => (f.dateTo && f.dateTo >= end ? f : { ...f, dateTo: end }));
       if (savedMode !== "edit") setPage(1);
       fetchProducts();
     },
@@ -262,6 +244,8 @@ export default function Products() {
   const selectedItems = Object.values(selected);
   const selectedCount = selectedItems.length;
   const pageAllSelected = items.length > 0 && items.every((p) => selected[p.id]);
+  // Moderator may not wipe the catalog: Select all locks bulk delete.
+  const blockBulkDelete = canMutate && !canClearAll && pageAllSelected;
 
   function toggleSelect(p) {
     setSelected((s) => {
@@ -360,26 +344,30 @@ export default function Products() {
           <h1 className="text-xl font-bold text-text">{t("products.title")}</h1>
           <p className="text-sm text-muted">{t("products.resultsCount", { count: total })}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onExport} className={toolbarBtn}>
-            <IconDownload width={16} height={16} /> {t("products.export")}
-          </button>
-          <button onClick={() => importRef.current?.click()} className={toolbarBtn}>
-            <IconUpload width={16} height={16} /> {t("products.import")}
-          </button>
-          <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={onImport} />
-          <button onClick={() => setClearAllOpen(true)}
-            className="ctrl-btn border border-red-500/50 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10">
-            <IconTrash width={16} height={16} /> {t("products.clearAll")}
-          </button>
-          <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
-            <IconPlus width={16} height={16} /> {t("products.addProduct")}
-          </button>
-        </div>
+        {canMutate && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={onExport} className={toolbarBtn}>
+              <IconDownload width={16} height={16} /> {t("products.export")}
+            </button>
+            <button onClick={() => importRef.current?.click()} className={toolbarBtn}>
+              <IconUpload width={16} height={16} /> {t("products.import")}
+            </button>
+            <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={onImport} />
+            {canClearAll && (
+              <button onClick={() => setClearAllOpen(true)}
+                className="ctrl-btn border border-red-500/50 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10">
+                <IconTrash width={16} height={16} /> {t("products.clearAll")}
+              </button>
+            )}
+            <button onClick={openAdd} className="ctrl-btn bg-accent px-3 py-2 text-sm text-black hover:brightness-95">
+              <IconPlus width={16} height={16} /> {t("products.addProduct")}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Search + view toggle */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-stretch gap-3">
         <div className="relative flex-1">
           <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-muted">
             <IconSearch width={18} height={18} />
@@ -388,14 +376,14 @@ export default function Products() {
             value={filters.q}
             onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
             placeholder={t("products.searchPlaceholder")}
-            className="ctrl-input py-2.5 ps-10"
+            className="ctrl-input h-full py-2.5 ps-10"
           />
         </div>
-        {/* View toggle (grid / table) — remembered per user */}
-        <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+        {/* View toggle (grid / table) — same height as the search field */}
+        <div className="flex shrink-0 items-stretch gap-1 self-stretch rounded-lg border border-border p-1">
           <button
             onClick={() => changeView("grid")}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3 text-sm font-medium transition ${
               view === "grid" ? "bg-accent text-black" : "text-muted hover:text-text"
             }`}
           >
@@ -404,7 +392,7 @@ export default function Products() {
           </button>
           <button
             onClick={() => changeView("table")}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3 text-sm font-medium transition ${
               view === "table" ? "bg-accent text-black" : "text-muted hover:text-text"
             }`}
           >
@@ -413,13 +401,13 @@ export default function Products() {
           </button>
         </div>
         <button onClick={() => setShowFilters((s) => !s)}
-          className="ctrl-btn border border-border px-3 py-2.5 text-sm text-text hover:bg-elevated lg:hidden">
+          className="ctrl-btn border border-border px-3 text-sm text-text hover:bg-elevated lg:hidden">
           <IconFilter width={18} height={18} />
         </button>
       </div>
 
       {/* Selection bar */}
-      {selectedCount > 0 && (
+      {canMutate && selectedCount > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent/10 px-4 py-2.5">
           <span className="text-sm font-medium text-text">
             {t("products.selectedCount", { count: selectedCount })}
@@ -429,8 +417,12 @@ export default function Products() {
             className="ctrl-btn border border-border bg-surface px-3 py-1.5 text-sm text-text hover:bg-elevated">
             <IconEdit width={15} height={15} /> {t("products.bulkEdit")}
           </button>
-          <button onClick={() => setBulkDeleteOpen(true)}
-            className="ctrl-btn border border-red-500/50 px-3 py-1.5 text-sm text-red-400 hover:bg-red-500/10">
+          <button
+            onClick={() => !blockBulkDelete && setBulkDeleteOpen(true)}
+            disabled={blockBulkDelete}
+            title={blockBulkDelete ? t("products.bulk.noDeleteAll") : undefined}
+            className="ctrl-btn border border-red-500/50 px-3 py-1.5 text-sm text-red-400 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
             <IconTrash width={15} height={15} /> {t("products.bulkDelete")}
           </button>
           <button onClick={clearSelection}
@@ -459,7 +451,7 @@ export default function Products() {
 
         {/* Grid / table + pagination */}
         <section className={`flex min-w-0 flex-1 flex-col ${showFilters ? "hidden lg:flex" : "flex"}`}>
-          {!loading && items.length > 0 && view === "grid" && (
+          {canMutate && !loading && items.length > 0 && view === "grid" && (
             <label className="flex w-fit cursor-pointer items-center gap-2 px-4 pt-4 text-xs text-muted">
               <input type="checkbox" className="ctrl-check" checked={pageAllSelected} onChange={toggleSelectAll} />
               {t("products.selectAll")}
@@ -499,9 +491,11 @@ export default function Products() {
                   <p className="text-lg font-semibold text-text">{t("products.emptyTitle")}</p>
                   <p className="mt-1 text-sm text-muted">{t("products.emptyBody")}</p>
                 </div>
-                <button onClick={openAdd} className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95">
-                  <IconPlus width={16} height={16} /> {t("products.addProduct")}
-                </button>
+                {canMutate && (
+                  <button onClick={openAdd} className="ctrl-btn bg-accent px-4 py-2 text-sm text-black hover:brightness-95">
+                    <IconPlus width={16} height={16} /> {t("products.addProduct")}
+                  </button>
+                )}
               </div>
             ) : view === "table" ? (
               <ProductTable
@@ -509,6 +503,8 @@ export default function Products() {
                 currency={currency}
                 selected={selected}
                 pageAllSelected={pageAllSelected}
+                canSelect={canMutate}
+                canMutate={canMutate}
                 onToggleSelect={toggleSelect}
                 onToggleSelectAll={toggleSelectAll}
                 onView={setViewing}
@@ -525,6 +521,8 @@ export default function Products() {
                     product={p}
                     currency={currency}
                     selected={!!selected[p.id]}
+                    canSelect={canMutate}
+                    canMutate={canMutate}
                     onToggleSelect={toggleSelect}
                     onView={setViewing}
                     onEdit={openEdit}

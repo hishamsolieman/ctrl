@@ -160,7 +160,7 @@ export default function FilterRail({
             <span className="mb-1 block text-xs text-muted">{t("products.filters.from")}</span>
             <input
               type="datetime-local"
-              value={filters.dateFrom}
+              value={filters.dateFrom || ""}
               onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
               className="ctrl-input-sm w-full text-sm"
             />
@@ -169,7 +169,7 @@ export default function FilterRail({
             <span className="mb-1 block text-xs text-muted">{t("products.filters.to")}</span>
             <input
               type="datetime-local"
-              value={filters.dateTo}
+              value={filters.dateTo || ""}
               onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
               className="ctrl-input-sm w-full text-sm"
             />
