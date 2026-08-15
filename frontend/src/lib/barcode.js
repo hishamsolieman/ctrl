@@ -60,10 +60,18 @@ export function pageRule(profile) {
   return `@page { size: ${pageSizeCss(profile)}; margin: ${m.toFixed(2)}mm; }`;
 }
 
+function fitFontPx(availablePx, text, maxPx, minPx = 6) {
+  const t = String(text || "");
+  if (!t) return maxPx;
+  const est = availablePx / (t.length * 0.62);
+  return Math.max(minPx, Math.min(maxPx, Math.floor(est)));
+}
+
 // Render a CODE128 barcode to a standalone SVG markup string.
 export function barcodeSvg(value, { widthPx = 180, heightPx = 60, fontSize = 14, displayValue = true } = {}) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  const moduleWidth = Math.min(4, Math.max(0.8, widthPx / 150));
+  const chars = Math.max(8, String(value || "").length);
+  const moduleWidth = Math.min(2.4, Math.max(0.7, widthPx / (chars * 11)));
   try {
     JsBarcode(svg, String(value), {
       format: "CODE128",
@@ -72,7 +80,7 @@ export function barcodeSvg(value, { widthPx = 180, heightPx = 60, fontSize = 14,
       displayValue,
       fontSize,
       textMargin: Math.max(1, Math.round(fontSize * 0.15)),
-      margin: 2,
+      margin: 1,
       background: "#ffffff",
       lineColor: "#000000",
     });
@@ -97,20 +105,23 @@ export function labelInfo(profile) {
 // One <div class="lbl"> for a single physical label.
 function labelHtml({ name, code, price, salePrice, currency, sizes }) {
   const hasDiscount = salePrice != null && Number(salePrice) < Number(price);
+  const oldTxt = money(price, currency);
+  const newTxt = money(hasDiscount ? salePrice : price, currency);
   const priceHtml = hasDiscount
-    ? `<span class="old">${money(price, currency)}</span>` +
-      `<span class="new">${money(salePrice, currency)}</span>`
-    : `<span class="new">${money(price, currency)}</span>`;
+    ? `<span class="old">${oldTxt}</span><span class="new">${newTxt}</span>`
+    : `<span class="new">${newTxt}</span>`;
   const svg = barcodeSvg(code, {
     widthPx: sizes.barW,
     heightPx: sizes.barH,
     fontSize: sizes.codeFont,
+    displayValue: false,
   });
   return (
-    `<div class="lbl">` +
-    `<div class="nm" dir="auto">${escapeHtml(name)}</div>` +
+    `<div class="lbl${hasDiscount ? " disc" : ""}">` +
+    `<div class="nm" dir="auto" style="font-size:${sizes.nameFont}px">${escapeHtml(name)}</div>` +
     `<div class="bc">${svg}</div>` +
-    `<div class="pr">${priceHtml}</div>` +
+    `<div class="cd" dir="ltr" style="font-size:${sizes.codeFont}px">${escapeHtml(code)}</div>` +
+    `<div class="pr" style="font-size:${sizes.priceFont}px">${priceHtml}</div>` +
     `</div>`
   );
 }
@@ -131,16 +142,19 @@ export function buildLabelSheet({ rows, currency, profile }) {
   const contentHpx = mmToPx(contentHmm);
   const contentWpx = mmToPx(contentWmm);
 
-  const sizes = {
-    nameFont: Math.max(7, Math.round(contentHpx * 0.15)),
-    priceFont: Math.max(7, Math.round(contentHpx * 0.15)),
-    codeFont: Math.max(7, Math.round(contentHpx * 0.12)),
-    barH: Math.max(20, Math.round(contentHpx * 0.4)),
-    barW: Math.round(contentWpx * 0.92),
-  };
-
   const labels = [];
   for (const r of rows) {
+    const hasDisc = r.salePrice != null && Number(r.salePrice) < Number(r.price);
+    const priceText = hasDisc
+      ? [money(r.price, currency), money(r.salePrice, currency)].sort((a, b) => b.length - a.length)[0]
+      : money(r.price, currency);
+    const sizes = {
+      nameFont: fitFontPx(contentWpx, (r.name || "").slice(0, 32), Math.round(contentHpx * 0.12), 6),
+      codeFont: fitFontPx(contentWpx, r.code, Math.round(contentHpx * 0.09), 6),
+      priceFont: fitFontPx(contentWpx, priceText, Math.round(contentHpx * (hasDisc ? 0.1 : 0.13)), 6),
+      barH: Math.max(14, Math.round(contentHpx * (hasDisc ? 0.28 : 0.36))),
+      barW: Math.round(contentWpx * 0.96),
+    };
     const one = labelHtml({ ...r, currency, sizes });
     const n = Math.max(1, Math.min(1000, Math.floor(Number(r.count) || 1)));
     for (let i = 0; i < n; i++) labels.push(one);
@@ -152,15 +166,18 @@ export function buildLabelSheet({ rows, currency, profile }) {
     `html,body{margin:0;padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}` +
     `*{box-sizing:border-box;}` +
     `.lbl{width:${contentWmm}mm;height:${contentHmm}mm;display:flex;flex-direction:column;` +
-    `align-items:center;justify-content:space-evenly;text-align:center;overflow:hidden;` +
+    `align-items:center;justify-content:flex-start;gap:2%;text-align:center;overflow:hidden;` +
     `font-family:'Poppins',system-ui,Arial,sans-serif;color:#000;page-break-after:always;}` +
     `.lbl:last-child{page-break-after:auto;}` +
-    `.nm{font-weight:700;line-height:1.1;font-size:${sizes.nameFont}px;width:100%;` +
+    `.nm{flex:0 0 auto;max-height:20%;font-weight:700;line-height:1.15;width:100%;` +
     `overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}` +
-    `.bc{display:flex;align-items:center;justify-content:center;width:100%;}` +
-    `.bc svg{max-width:100%;height:auto;}` +
-    `.pr{font-size:${sizes.priceFont}px;line-height:1.1;display:flex;gap:.4em;align-items:baseline;justify-content:center;flex-wrap:wrap;}` +
-    `.pr .old{text-decoration:line-through;color:#666;font-weight:500;}` +
+    `.bc{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;width:100%;}` +
+    `.bc svg{max-width:100%;max-height:100%;width:auto;height:auto;}` +
+    `.cd{flex:0 0 auto;font-family:ui-monospace,Consolas,monospace;` +
+    `letter-spacing:.04em;line-height:1.1;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}` +
+    `.pr{flex:0 0 auto;max-height:26%;line-height:1.15;display:flex;` +
+    `flex-direction:column;align-items:center;justify-content:center;gap:0;width:100%;}` +
+    `.pr .old{text-decoration:line-through;color:#555;font-weight:500;font-size:0.85em;}` +
     `.pr .new{font-weight:700;}` +
     `</style>`;
 

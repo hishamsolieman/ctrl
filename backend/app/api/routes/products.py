@@ -394,6 +394,7 @@ def barcode_items(
                 {
                     "product_id": p.id,
                     "product_name": p.name,
+                    "product_code": p.code,
                     "variant_id": v.id,
                     "code": v.code,
                     "price": float(p.price or 0),
