@@ -147,6 +147,7 @@ def _serialize(sale: Sale, seller: str | None) -> dict:
         "customer_name": sale.customer.name if sale.customer else None,
         "customer_phone": sale.customer.phone if sale.customer else None,
         "payment_method_id": sale.payment_method_id,
+        "payment_method_code": sale.payment.code if sale.payment else None,
         "payment_method_en": sale.payment.name_en if sale.payment else None,
         "payment_method_ar": sale.payment.name_ar if sale.payment else None,
         "item_count": sale.item_count,
@@ -154,6 +155,8 @@ def _serialize(sale: Sale, seller: str | None) -> dict:
         "discount": float(sale.discount or 0),
         "total": float(sale.total or 0),
         "paid_amount": float(sale.paid_amount or 0),
+        "change_amount": float(sale.change_amount or 0),
+        "change_raw": float(sale.change_raw or 0),
         "items": [
             {
                 "id": i.id,
@@ -539,13 +542,12 @@ def create_invoice(
         list_price = round(float(product.price or 0), 2)
         min_price = round(float(product.min_price or 0), 2)
         unit = _clamp_price(li.unit_price, min_price, list_price)
-        en, _ar = _full_labels(db, stock)
         sale.items.append(SaleItem(
             product_id=product.id,
             variant_id=variant.id,
             stock_id=stock.id,
             code=variant.code,
-            name=f"{product.name}{(' · ' + en) if en else ''}",
+            name=product.name,
             attributes=_attr_snapshot(db, stock),
             unit_price=unit,
             list_price=list_price,
@@ -695,13 +697,12 @@ def update_invoice(
         list_price = round(float(product.price or 0), 2)
         min_price = round(float(product.min_price or 0), 2)
         unit = _clamp_price(li.unit_price, min_price, list_price)
-        en, _ar = _full_labels(db, stock)
         sale.items.append(SaleItem(
             product_id=product.id,
             variant_id=variant.id,
             stock_id=stock.id,
             code=variant.code,
-            name=f"{product.name}{(' · ' + en) if en else ''}",
+            name=product.name,
             attributes=_attr_snapshot(db, stock),
             unit_price=unit,
             list_price=list_price,

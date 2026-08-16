@@ -325,7 +325,8 @@ INSERT IGNORE INTO `settings` (`key`, `value`) VALUES
   ('branch_address', ''),
   ('report_logo', ''),
   ('invoice_logo', ''),
-  ('invoice_language', 'auto');
+  ('invoice_language', 'auto'),
+  ('backup_duration_hours', '24');
 
 -- Payment methods (configurable) ----------------------------------------------
 INSERT IGNORE INTO `payment_methods` (`id`, `code`, `name_en`, `name_ar`, `is_active`, `sort_order`) VALUES
@@ -1669,6 +1670,8 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'invoices.emptyBody', 'ar', 'ستظهر المبيعات هنا عند إتمامها.'),
   ('ui', 'invoices.edit', 'en', 'Edit invoice'),
   ('ui', 'invoices.edit', 'ar', 'تعديل الفاتورة'),
+  ('ui', 'invoices.print', 'en', 'Print invoice'),
+  ('ui', 'invoices.print', 'ar', 'طباعة الفاتورة'),
   ('ui', 'invoices.unknown', 'en', 'Unknown customer'),
   ('ui', 'invoices.unknown', 'ar', 'عميل غير معروف'),
   ('ui', 'invoices.created', 'en', 'Invoice created.'),
@@ -3090,6 +3093,16 @@ INSERT IGNORE INTO `translations` (`namespace`, `key`, `locale`, `value`) VALUES
   ('ui', 'settings.general.section.store', 'ar', 'المتجر'),
   ('ui', 'settings.general.section.storeSub', 'en', 'Branch address, currency, invoice language, and checkout validation.'),
   ('ui', 'settings.general.section.storeSub', 'ar', 'عنوان الفرع والعملة ولغة الفاتورة والتحقق عند الدفع.'),
+  ('ui', 'settings.general.section.backup', 'en', 'Backup'),
+  ('ui', 'settings.general.section.backup', 'ar', 'النسخ الاحتياطي'),
+  ('ui', 'settings.general.section.backupSub', 'en', 'How often the system should create a backup.'),
+  ('ui', 'settings.general.section.backupSub', 'ar', 'معدل إنشاء نسخة احتياطية.'),
+  ('ui', 'settings.general.backupHours', 'en', 'Backup duration (hours)'),
+  ('ui', 'settings.general.backupHours', 'ar', 'مدة النسخ الاحتياطي (ساعات)'),
+  ('ui', 'settings.general.backupHoursHint', 'en', 'Whole hours only. Minimum 1.'),
+  ('ui', 'settings.general.backupHoursHint', 'ar', 'ساعات صحيحة فقط. الحد الأدنى 1.'),
+  ('ui', 'settings.general.errors.backupHours', 'en', 'Enter a whole number of hours (1 or more).'),
+  ('ui', 'settings.general.errors.backupHours', 'ar', 'أدخل عدد ساعات صحيحًا (1 أو أكثر).'),
   ('ui', 'settings.printer.roll', 'en', 'Roll'),
   ('ui', 'settings.printer.roll', 'ar', 'رول'),
   ('ui', 'settings.printer.modal.heightHint', 'en', 'Set 0 for a thermal roll (invoices). Length follows the receipt. Any other value is a fixed page.'),

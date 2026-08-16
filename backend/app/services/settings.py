@@ -18,6 +18,9 @@ INVOICE_LANGUAGE_KEY = "invoice_language"
 DEFAULT_INVOICE_LANGUAGE = "auto"
 INVOICE_LANGUAGES = ("auto", "en", "ar")
 
+BACKUP_DURATION_KEY = "backup_duration_hours"
+DEFAULT_BACKUP_DURATION = "24"
+
 
 def get_setting(db: Session, key: str, default: str = "") -> str:
     row = db.get(Setting, key)
@@ -39,7 +42,16 @@ def get_currency(db: Session) -> str:
     return get_setting(db, CURRENCY_KEY, DEFAULT_CURRENCY)
 
 
-def get_general_settings(db: Session) -> dict[str, str]:
+def get_backup_duration_hours(db: Session) -> int:
+    raw = get_setting(db, BACKUP_DURATION_KEY, DEFAULT_BACKUP_DURATION)
+    try:
+        n = int(str(raw).strip())
+        return n if n >= 1 else int(DEFAULT_BACKUP_DURATION)
+    except ValueError:
+        return int(DEFAULT_BACKUP_DURATION)
+
+
+def get_general_settings(db: Session) -> dict:
     return {
         "branch_address": get_setting(db, BRANCH_ADDRESS_KEY, ""),
         "report_logo": get_setting(db, REPORT_LOGO_KEY, ""),
@@ -47,4 +59,5 @@ def get_general_settings(db: Session) -> dict[str, str]:
         "customer_phone_regex": get_setting(db, PHONE_REGEX_KEY, DEFAULT_PHONE_REGEX),
         "currency": get_currency(db),
         "invoice_language": get_setting(db, INVOICE_LANGUAGE_KEY, DEFAULT_INVOICE_LANGUAGE),
+        "backup_duration_hours": get_backup_duration_hours(db),
     }

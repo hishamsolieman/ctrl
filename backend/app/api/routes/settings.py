@@ -23,6 +23,7 @@ from app.models.print_profile import PrintProfile
 from app.models.user import User
 from app.services.logging import log_action
 from app.services.settings import (
+    BACKUP_DURATION_KEY,
     BRANCH_ADDRESS_KEY,
     CURRENCY_KEY,
     INVOICE_LANGUAGE_KEY,
@@ -76,6 +77,7 @@ class GeneralIn(BaseModel):
     customer_phone_regex: str = Field(min_length=1, max_length=255)
     currency: str = Field(min_length=1, max_length=10)
     invoice_language: str = "auto"
+    backup_duration_hours: int = Field(ge=1, le=8760)
 
 
 # --------------------------------------------------------------------------- #
@@ -129,7 +131,7 @@ def _assignments(db: Session) -> dict[str, int | None]:
 # --------------------------------------------------------------------------- #
 @router.get("/general")
 def read_general(db: Session = Depends(get_db), _u: User = Depends(get_current_user)):
-    """Branch, logos, currency, phone regex, invoice language.
+    """Branch, logos, currency, phone regex, invoice language, backup interval.
 
     Any authenticated role — cashiers need this when printing invoices.
     """
@@ -164,6 +166,7 @@ def update_general(
         PHONE_REGEX_KEY: regex,
         CURRENCY_KEY: currency,
         INVOICE_LANGUAGE_KEY: lang,
+        BACKUP_DURATION_KEY: str(int(payload.backup_duration_hours)),
     }
     set_settings(db, values)
     log_action(

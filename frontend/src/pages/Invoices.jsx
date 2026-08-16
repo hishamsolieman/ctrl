@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/AuthContext";
+import { useBrand } from "@/context/BrandContext";
 import { useToast } from "@/context/ToastContext";
 import { listInvoices, getInvoiceStats, exportInvoices } from "@/lib/invoices";
+import { invoiceItemName, printSaleInvoice } from "@/lib/invoicePrint";
 import { posBootstrap } from "@/lib/pos";
 import InvoiceModal from "@/components/invoices/InvoiceModal";
 import StatCard, { MASK } from "@/components/StatCard";
@@ -23,6 +25,7 @@ import {
   IconEyeOff,
   IconDownload,
   IconRefresh,
+  IconPrinter,
 } from "@/components/icons";
 
 const PAGE_SIZE = 10;
@@ -57,6 +60,7 @@ export default function Invoices() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const { user, loading: authLoading } = useAuth();
+  const brand = useBrand();
   const toast = useToast();
 
   const canAccess = !!user && user.role_level >= MODERATOR_LEVEL;
@@ -80,6 +84,7 @@ export default function Invoices() {
   const [showItems, setShowItems] = useState(false);
 
   const [modal, setModal] = useState({ open: false, mode: "create", invoice: null });
+  const [printingId, setPrintingId] = useState(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -188,6 +193,24 @@ export default function Invoices() {
       await exportInvoices(filterParams);
     } catch {
       toast.error(t("auth.genericError"));
+    }
+  }
+
+  async function onPrint(sale) {
+    if (!sale || printingId) return;
+    setPrintingId(sale.id);
+    try {
+      await printSaleInvoice({
+        sale,
+        brand,
+        i18n,
+        currency: stats?.currency || boot?.currency || "",
+        sellerName: String(sale.seller || "").trim().split(/\s+/).filter(Boolean)[0] || "",
+      });
+    } catch {
+      toast.error(t("auth.genericError"));
+    } finally {
+      setPrintingId(null);
     }
   }
 
@@ -378,9 +401,7 @@ export default function Invoices() {
                       hideTitle={hideLbl}
                     />
                   </th>
-                  {canModify && (
-                    <th className="px-4 py-3 text-end font-medium">{t("invoices.table.actions")}</th>
-                  )}
+                  <th className="px-4 py-3 text-end font-medium">{t("invoices.table.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -391,12 +412,14 @@ export default function Invoices() {
                       key={s.id}
                       s={s}
                       isOpen={isOpen}
-                      cols={canModify ? COLS + 1 : COLS}
+                      cols={COLS + 1}
                       canModify={canModify}
+                      printing={printingId === s.id}
                       showTotals={showTotals}
                       showItems={showItems}
                       onToggle={() => toggleRow(s.id)}
                       onEdit={() => setModal({ open: true, mode: "edit", invoice: s })}
+                      onPrint={() => onPrint(s)}
                       money={money}
                       fmtDate={fmtDate}
                       isAr={isAr}
@@ -454,10 +477,12 @@ function FragmentRow({
   isOpen,
   cols,
   canModify,
+  printing,
   showTotals,
   showItems,
   onToggle,
   onEdit,
+  onPrint,
   money,
   fmtDate,
   isAr,
@@ -520,15 +545,24 @@ function FragmentRow({
         <td className="px-4 py-3 text-end font-medium text-text tabular-nums">
           {showTotals ? money(s.total) : MASK}
         </td>
-        {canModify && (
-          <td className="px-4 py-3">
-            <div className="flex items-center justify-end gap-2">
+        <td className="px-4 py-3">
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              title={t("invoices.print")}
+              className={`${iconBtn} disabled:opacity-40`}
+              onClick={onPrint}
+              disabled={printing}
+            >
+              <IconPrinter width={15} height={15} />
+            </button>
+            {canModify && (
               <button title={t("invoices.edit")} className={iconBtn} onClick={onEdit}>
                 <IconEdit width={15} height={15} />
               </button>
-            </div>
-          </td>
-        )}
+            )}
+          </div>
+        </td>
       </tr>
 
       {isOpen && (
@@ -548,7 +582,7 @@ function FragmentRow({
                   {s.items.map((it, idx) => (
                     <tr key={idx} className="border-t border-border/60">
                       <td className="px-3 py-2">
-                        <p className="text-text">{it.name}</p>
+                        <p className="text-text">{invoiceItemName(it.name, it.attributes)}</p>
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                           <span className="font-mono text-[11px] text-muted" dir="ltr">
                             {it.code}

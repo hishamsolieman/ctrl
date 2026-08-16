@@ -853,13 +853,12 @@ def checkout(payload: CheckoutIn, request: Request,
         list_price = round(float(product.price or 0), 2)
         min_price = float(product.min_price or 0)
         line_total = round(unit * item.quantity, 2)
-        en, _ar = _full_labels(db, stock)
         sale.items.append(SaleItem(
             product_id=product.id,
             variant_id=variant.id,
             stock_id=stock.id,
             code=variant.code,
-            name=f"{product.name}{(' · ' + en) if en else ''}",
+            name=product.name,
             attributes=_attr_snapshot(db, stock),
             unit_price=unit,
             list_price=list_price,

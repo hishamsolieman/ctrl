@@ -7,7 +7,7 @@ import { posScan, posSetQty, posSwitch, posRelease, posCheckout, lookupCustomer 
 import { mapCartLine } from "@/lib/carts";
 import { mediaUrl } from "@/lib/products";
 import { getPrintTarget, getGeneralSettings, printDocument, resolveInvoiceLanguage } from "@/lib/settings";
-import { buildInvoiceHtml } from "@/lib/invoicePrint";
+import { buildInvoiceHtml, invoiceItemName } from "@/lib/invoicePrint";
 import {
   IconSearch,
   IconTrash,
@@ -136,6 +136,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
   const [editPrice, setEditPrice] = useState(null); // stock_id whose price is being edited
   const [editQty, setEditQty] = useState(null); // stock_id whose qty is being edited
   const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const scanRef = useRef(null);
 
   const items = tab.items;
@@ -421,46 +422,54 @@ export default function CartWorkspace({ tab, boot, patch }) {
   // Auto-print the finished invoice using the profile assigned to "Invoice
   // Printing". With no assigned profile, the OS default printer/paper is used.
   async function autoPrintInvoice(sale) {
+    const [{ profile }, general] = await Promise.all([
+      getPrintTarget("invoice").catch(() => ({ profile: null })),
+      getGeneralSettings().catch(() => ({})),
+    ]);
+    const invLang = resolveInvoiceLanguage(general.invoice_language, i18n.resolvedLanguage);
+    const invIsAr = invLang === "ar";
+    const tInv = i18n.getFixedT(invLang);
+    const labels = {
+      title: tInv("pos.invoice.title"),
+      paidBadge: tInv("pos.invoice.paidBadge"),
+      billTo: tInv("pos.invoice.billTo"),
+      sellerName: tInv("pos.invoice.sellerName"),
+      payment: tInv("pos.invoice.payment"),
+      item: tInv("pos.invoice.item"),
+      qty: tInv("pos.table.qty"),
+      price: tInv("pos.table.price"),
+      total: tInv("pos.table.total"),
+      subtotal: tInv("pos.invoice.subtotal"),
+      discount: tInv("pos.stats.discount"),
+      totalLabel: tInv("pos.stats.total"),
+      paid: tInv("pos.payment.paid"),
+      changeRaw: tInv("pos.payment.changeRaw"),
+      changeExact: tInv("pos.payment.changeExact"),
+      thanks: tInv("pos.invoice.thanks"),
+    };
+    const logo = general.invoice_logo ? mediaUrl(general.invoice_logo) : brand.logo;
+    const body = buildInvoiceHtml({
+      inv: saleToInvoiceModel(sale, invIsAr, sellerName),
+      brand: { ...brand, logo, address: general.branch_address || "" },
+      isAr: invIsAr,
+      isCash,
+      labels,
+      profile,
+      money,
+      num2,
+    });
+    await printDocument(body);
+  }
+
+  async function reprintInvoice() {
+    if (!tab.sale || printing) return;
+    setPrinting(true);
     try {
-      const [{ profile }, general] = await Promise.all([
-        getPrintTarget("invoice").catch(() => ({ profile: null })),
-        getGeneralSettings().catch(() => ({})),
-      ]);
-      const invLang = resolveInvoiceLanguage(general.invoice_language, i18n.resolvedLanguage);
-      const invIsAr = invLang === "ar";
-      const tInv = i18n.getFixedT(invLang);
-      const labels = {
-        title: tInv("pos.invoice.title"),
-        paidBadge: tInv("pos.invoice.paidBadge"),
-        billTo: tInv("pos.invoice.billTo"),
-        sellerName: tInv("pos.invoice.sellerName"),
-        payment: tInv("pos.invoice.payment"),
-        item: tInv("pos.invoice.item"),
-        qty: tInv("pos.table.qty"),
-        price: tInv("pos.table.price"),
-        total: tInv("pos.table.total"),
-        subtotal: tInv("pos.invoice.subtotal"),
-        discount: tInv("pos.stats.discount"),
-        totalLabel: tInv("pos.stats.total"),
-        paid: tInv("pos.payment.paid"),
-        changeRaw: tInv("pos.payment.changeRaw"),
-        changeExact: tInv("pos.payment.changeExact"),
-        thanks: tInv("pos.invoice.thanks"),
-      };
-      const logo = general.invoice_logo ? mediaUrl(general.invoice_logo) : brand.logo;
-      const body = buildInvoiceHtml({
-        inv: saleToInvoiceModel(sale, invIsAr, sellerName),
-        brand: { ...brand, logo, address: general.branch_address || "" },
-        isAr: invIsAr,
-        isCash,
-        labels,
-        profile,
-        money,
-        num2,
-      });
-      await printDocument(body);
+      await autoPrintInvoice(tab.sale);
     } catch {
-      /* a print failure must not disrupt the completed sale */
+      toast.error(t("auth.genericError"));
+    } finally {
+      setPrinting(false);
     }
   }
 
@@ -495,7 +504,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
         newSale();
       } else {
         patch({ sale });
-        autoPrintInvoice(sale);
+        autoPrintInvoice(sale).catch(() => {});
       }
     } catch (err) {
       toast.error(t(err?.response?.data?.detail || "auth.genericError"));
@@ -1039,21 +1048,18 @@ export default function CartWorkspace({ tab, boot, patch }) {
           <div className="mx-auto max-w-2xl">
             <div className="overflow-hidden rounded-2xl border border-border bg-gradient-to-b from-elevated/40 to-surface shadow-xl">
               {/* Brand header */}
-              <div className="flex items-start justify-between gap-4 border-b border-border bg-elevated/40 p-5">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between gap-4 border-b border-border bg-elevated/40 p-5">
+                <div className="flex items-center">
                   {brand.logo && (
-                    <img src={brand.logo} alt="" className="h-10 w-10 rounded-lg object-contain" />
+                    <img
+                      src={brand.logo}
+                      alt=""
+                      className="h-14 w-14 shrink-0 object-contain object-center"
+                    />
                   )}
-                  <div>
-                    <p className="text-lg font-extrabold tracking-tight text-text">{brand.name}</p>
-                    {brand.motto && <p className="text-xs text-muted">{brand.motto}</p>}
-                  </div>
                 </div>
                 <div className="text-end">
-                  <p className="text-sm font-bold uppercase tracking-[0.2em] text-accent">
-                    {t("pos.invoice.title")}
-                  </p>
-                  <p className="mt-1 font-mono text-sm text-text">
+                  <p className="font-mono text-sm text-text">
                     {inv.invoice_no || t("pos.invoice.draft")}
                   </p>
                   <p className="text-xs text-muted" dir="ltr">
@@ -1099,7 +1105,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
                     {inv.items.map((it, idx) => (
                       <tr key={idx} className="border-b border-border/50 last:border-0">
                         <td className="px-2 py-2 text-start">
-                          <p className="font-medium text-text">{it.name}</p>
+                          <p className="font-medium text-text">{invoiceItemName(it.name, it.attributes)}</p>
                           {(it.attributes || []).length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-1.5">
                               {it.attributes.map((a, i2) => (
@@ -1151,7 +1157,7 @@ export default function CartWorkspace({ tab, boot, patch }) {
                       </div>
                       <div className="flex items-center justify-between font-semibold text-accent">
                         <span>{t("pos.payment.changeRaw")}</span>
-                        <span>{money(inv.changeRaw)}</span>
+                        <span>{money(inv.changeExact)}</span>
                       </div>
                     </div>
                   )}
@@ -1237,14 +1243,14 @@ export default function CartWorkspace({ tab, boot, patch }) {
         )}
         {step === 3 && committed && (
           <>
-            {tab.skipInvoice ? (
-              <span className="text-sm text-muted">{t("pos.invoice.skipped")}</span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 text-sm text-muted">
-                <IconPrinter width={15} height={15} className="text-accent" />
-                {t("pos.invoice.autoPrinted")}
-              </span>
-            )}
+            <button
+              type="button"
+              onClick={reprintInvoice}
+              disabled={printing}
+              className="ctrl-btn border border-border px-4 py-2 text-sm text-text hover:bg-elevated disabled:opacity-50"
+            >
+              <IconPrinter width={16} height={16} /> {t("pos.invoice.print")}
+            </button>
             <button
               type="button"
               onClick={newSale}

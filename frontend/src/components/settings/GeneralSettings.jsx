@@ -14,6 +14,7 @@ const EMPTY = {
   customer_phone_regex: "",
   currency: "",
   invoice_language: "auto",
+  backup_duration_hours: "24",
 };
 
 function LogoCard({ label, hint, value, onChange, uploading, Icon }) {
@@ -116,6 +117,7 @@ export default function GeneralSettings() {
         customer_phone_regex: data.customer_phone_regex || "",
         currency: data.currency || "",
         invoice_language: LANGS.includes(data.invoice_language) ? data.invoice_language : "auto",
+        backup_duration_hours: String(data.backup_duration_hours || 24),
       });
     } catch {
       toast.error(t("auth.genericError"));
@@ -157,6 +159,8 @@ export default function GeneralSettings() {
       return toast.error(t("settings.general.errors.badRegex"));
     }
     if (!form.currency.trim()) return toast.error(t("settings.general.errors.currencyRequired"));
+    const hours = parseInt(form.backup_duration_hours, 10);
+    if (!Number.isInteger(hours) || hours < 1) return toast.error(t("settings.general.errors.backupHours"));
 
     setSaving(true);
     try {
@@ -167,8 +171,14 @@ export default function GeneralSettings() {
         customer_phone_regex: regex,
         currency: form.currency.trim(),
         invoice_language: form.invoice_language || "auto",
+        backup_duration_hours: hours,
       });
-      setForm((f) => ({ ...f, ...saved, invoice_language: saved.invoice_language || "auto" }));
+      setForm((f) => ({
+        ...f,
+        ...saved,
+        invoice_language: saved.invoice_language || "auto",
+        backup_duration_hours: String(saved.backup_duration_hours || hours),
+      }));
       toast.success(t("settings.general.saved"));
     } catch (err) {
       const detail = err?.response?.data?.detail;
@@ -188,6 +198,7 @@ export default function GeneralSettings() {
           <div className="ctrl-card h-64 animate-pulse bg-elevated/40" />
           <div className="ctrl-card h-64 animate-pulse bg-elevated/40" />
         </div>
+        <div className="ctrl-card h-36 animate-pulse bg-elevated/40" />
         <div className="ctrl-card h-52 animate-pulse bg-elevated/40" />
       </div>
     );
@@ -217,6 +228,26 @@ export default function GeneralSettings() {
             uploading={uploading === "invoice_logo"}
             onChange={(v) => onLogo("invoice_logo", v)}
           />
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-3">
+          <h2 className="text-base font-semibold text-text">{t("settings.general.section.backup")}</h2>
+          <p className="text-sm text-muted">{t("settings.general.section.backupSub")}</p>
+        </div>
+        <div className="ctrl-card p-5 sm:p-6">
+          <div className="max-w-sm">
+            <label className={labelCls}>{t("settings.general.backupHours")}</label>
+            <input
+              className={inputCls}
+              dir="ltr"
+              inputMode="numeric"
+              value={form.backup_duration_hours}
+              onChange={(e) => set("backup_duration_hours", e.target.value.replace(/\D/g, ""))}
+            />
+            <p className="mt-1.5 text-[12px] text-muted">{t("settings.general.backupHoursHint")}</p>
+          </div>
         </div>
       </section>
 
