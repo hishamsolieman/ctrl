@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/context/ToastContext";
-import { getGeneralSettings, updateGeneralSettings } from "@/lib/settings";
+import {
+  getGeneralSettings,
+  updateGeneralSettings,
+  getBackupInfo,
+  getBackupStatus,
+  backupNow,
+  restoreBackup,
+} from "@/lib/settings";
 import { uploadImage, mediaUrl } from "@/lib/products";
-import { IconImage, IconX, IconActivity, IconReceipt } from "@/components/icons";
+import { IconImage, IconX, IconActivity, IconReceipt, IconDownload, IconUpload } from "@/components/icons";
+import BackupJobModal from "@/components/settings/BackupJobModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 const LANGS = ["auto", "en", "ar"];
 
@@ -103,6 +112,11 @@ export default function GeneralSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState("");
+  const [backupInfo, setBackupInfo] = useState(null);
+  const [jobKind, setJobKind] = useState("");
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  const restoreRef = useRef(null);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -129,6 +143,66 @@ export default function GeneralSettings() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadBackup = useCallback(async () => {
+    try {
+      setBackupInfo(await getBackupInfo());
+    } catch {
+      /* Admin-only; ignore for other roles */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBackup();
+  }, [loadBackup]);
+
+  async function onBackupNow() {
+    try {
+      await backupNow();
+      setJobKind("backup");
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(detail ? t(detail, { defaultValue: detail }) : t("auth.genericError"));
+    }
+  }
+
+  async function onRestoreFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".bak")) {
+      return toast.error(t("backup.errors.badFile"));
+    }
+    setRestoreFile(file);
+  }
+
+  async function confirmRestore() {
+    if (!restoreFile) return;
+    setRestoring(true);
+    try {
+      await restoreBackup(restoreFile);
+      setRestoreFile(null);
+      setJobKind("restore");
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(detail ? t(detail, { defaultValue: detail }) : t("auth.genericError"));
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  async function onJobClose() {
+    const wasRestore = jobKind === "restore";
+    setJobKind("");
+    loadBackup();
+    if (!wasRestore) return;
+    try {
+      const s = await getBackupStatus();
+      if (s.state === "done") window.location.reload();
+    } catch {
+      /* stay on the page if status cannot be read */
+    }
+  }
 
   async function onLogo(key, fileOrEmpty) {
     if (fileOrEmpty === "") {
@@ -237,19 +311,82 @@ export default function GeneralSettings() {
           <p className="text-sm text-muted">{t("settings.general.section.backupSub")}</p>
         </div>
         <div className="ctrl-card p-5 sm:p-6">
-          <div className="max-w-sm">
-            <label className={labelCls}>{t("settings.general.backupHours")}</label>
-            <input
-              className={inputCls}
-              dir="ltr"
-              inputMode="numeric"
-              value={form.backup_duration_hours}
-              onChange={(e) => set("backup_duration_hours", e.target.value.replace(/\D/g, ""))}
-            />
-            <p className="mt-1.5 text-[12px] text-muted">{t("settings.general.backupHoursHint")}</p>
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+            <div className="max-w-sm lg:col-span-5">
+              <label className={labelCls}>{t("settings.general.backupHours")}</label>
+              <input
+                className={inputCls}
+                dir="ltr"
+                inputMode="numeric"
+                value={form.backup_duration_hours}
+                onChange={(e) => set("backup_duration_hours", e.target.value.replace(/\D/g, ""))}
+              />
+              <p className="mt-1.5 text-[12px] text-muted">{t("settings.general.backupHoursHint")}</p>
+            </div>
+            <div className="flex flex-col justify-end gap-2 sm:flex-row sm:items-end lg:col-span-7">
+              <button
+                type="button"
+                onClick={onBackupNow}
+                className="ctrl-btn border border-border px-4 py-2.5 text-sm text-text hover:bg-elevated"
+              >
+                <IconDownload width={16} height={16} /> {t("settings.backup.now")}
+              </button>
+              <input
+                ref={restoreRef}
+                type="file"
+                accept=".bak"
+                className="hidden"
+                onChange={onRestoreFile}
+              />
+              <button
+                type="button"
+                onClick={() => restoreRef.current?.click()}
+                className="ctrl-btn border border-border px-4 py-2.5 text-sm text-text hover:bg-elevated"
+              >
+                <IconUpload width={16} height={16} /> {t("settings.backup.restore")}
+              </button>
+            </div>
+            {backupInfo && (
+              <div className="space-y-1 text-xs text-muted lg:col-span-12">
+                <p>
+                  {t("settings.backup.last")}:{" "}
+                  <span className="text-text">
+                    {backupInfo.last_at
+                      ? new Date(backupInfo.last_at).toLocaleString()
+                      : t("settings.backup.never")}
+                  </span>
+                  {" · "}
+                  {t("settings.backup.next")}:{" "}
+                  <span className="text-text">
+                    {backupInfo.next_at ? new Date(backupInfo.next_at).toLocaleString() : "—"}
+                  </span>
+                </p>
+                {(backupInfo.files || []).length > 0 && (
+                  <p dir="ltr">
+                    {t("settings.backup.kept")}:{" "}
+                    {backupInfo.files.map((f) => f.name).join(" · ")}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
+
+      <BackupJobModal open={!!jobKind} kind={jobKind} onClose={onJobClose} />
+
+      <ConfirmDialog
+        open={!!restoreFile}
+        onClose={() => !restoring && setRestoreFile(null)}
+        onConfirm={confirmRestore}
+        loading={restoring}
+        title={t("settings.backup.restoreTitle")}
+        body={t("settings.backup.restoreConfirm")}
+        confirmLabel={t("products.attrs.yes")}
+        cancelLabel={t("products.attrs.no")}
+        icon={IconUpload}
+        tone="accent"
+      />
 
       <section>
         <div className="mb-3">

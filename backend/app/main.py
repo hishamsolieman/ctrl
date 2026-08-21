@@ -1,6 +1,7 @@
 """CTRL FastAPI application factory."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,15 +25,27 @@ from app.api.routes import (
     pos,
     products,
     settings as settings_routes,
+    license as license_routes,
     suppliers,
     users,
 )
 from app.core.config import settings
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    from app.services.backup import start_worker, stop_worker
+
+    start_worker()
+    yield
+    stop_worker()
+
+
 app = FastAPI(
     title=f"{settings.BRAND_NAME} API",
     description=f"{settings.BRAND_NAME} — {settings.BRAND_MOTTO}",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Serve uploaded product images.
@@ -62,6 +75,7 @@ app.include_router(attributes.router)
 app.include_router(products.router)
 app.include_router(pos.router)
 app.include_router(settings_routes.router)
+app.include_router(license_routes.router)
 app.include_router(expenses.router)
 app.include_router(dashboard.router)
 app.include_router(funds.router)

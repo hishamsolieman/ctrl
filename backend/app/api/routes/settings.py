@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -178,6 +178,69 @@ def update_general(
         request=request,
     )
     return get_general_settings(db)
+
+
+# --------------------------------------------------------------------------- #
+# Backup / restore (Admin+)
+# --------------------------------------------------------------------------- #
+@router.get("/backup")
+def read_backup(_u: User = Depends(require_role("Admin"))):
+    from app.services.backup import schedule_info
+
+    return schedule_info()
+
+
+@router.get("/backup/status")
+def read_backup_status(_u: User = Depends(require_role("Admin"))):
+    from app.services.backup import JOB
+
+    return JOB.snapshot()
+
+
+@router.post("/backup/now")
+def backup_now(
+    request: Request,
+    actor: User = Depends(require_role("Admin")),
+):
+    from app.services.backup import JOB, request_backup_now
+
+    try:
+        request_backup_now(actor.id)
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    return JOB.snapshot()
+
+
+@router.post("/backup/restore")
+async def restore_backup(
+    request: Request,
+    actor: User = Depends(require_role("Admin")),
+    file: UploadFile = File(...),
+):
+    from app.services.backup import BACKUP_DIR, JOB, _ensure_dir, _stamp, request_restore
+
+    name = (file.filename or "").strip()
+    if not name.lower().endswith(".bak"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "backup.errors.badFile")
+    if JOB.snapshot()["state"] == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "backup.errors.busy")
+
+    _ensure_dir()
+    dest = BACKUP_DIR / f"_incoming_{_stamp()}.bak"
+    try:
+        dest.write_bytes(await file.read())
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "backup.errors.badFile")
+    if dest.stat().st_size < 32:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "backup.errors.badFile")
+
+    try:
+        request_restore(dest, actor.id)
+    except RuntimeError as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    return JOB.snapshot()
 
 
 # --------------------------------------------------------------------------- #

@@ -20,6 +20,7 @@ INVOICE_LANGUAGES = ("auto", "en", "ar")
 
 BACKUP_DURATION_KEY = "backup_duration_hours"
 DEFAULT_BACKUP_DURATION = "24"
+BACKUP_LAST_AT_KEY = "backup_last_at"
 
 
 def get_setting(db: Session, key: str, default: str = "") -> str:

@@ -3,6 +3,14 @@ export default {
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   darkMode: "class",
   theme: {
+    // Compact / hamburger layout at 1024px and below. Desktop `lg:` from 1025px.
+    screens: {
+      sm: "640px",
+      md: "768px",
+      lg: "1025px",
+      xl: "1280px",
+      "2xl": "1536px",
+    },
     extend: {
       colors: {
         // Backed by CSS variables (R G B triplets) set at runtime from the root

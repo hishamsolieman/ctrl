@@ -45,6 +45,22 @@ def decrypt(token: str) -> str:
     return aes.decrypt(nonce, ct, None).decode("utf-8")
 
 
+def encrypt_bytes(data: bytes) -> bytes:
+    """Encrypt raw bytes (AES-256-GCM). Output: nonce || ciphertext || tag."""
+    aes = AESGCM(_AES_KEY)
+    nonce = os.urandom(_NONCE_SIZE)
+    return nonce + aes.encrypt(nonce, data, None)
+
+
+def decrypt_bytes(blob: bytes) -> bytes:
+    """Decrypt a blob produced by :func:`encrypt_bytes`."""
+    if len(blob) < _NONCE_SIZE + 16:
+        raise ValueError("backup.errors.badFile")
+    nonce, ct = blob[:_NONCE_SIZE], blob[_NONCE_SIZE:]
+    aes = AESGCM(_AES_KEY)
+    return aes.decrypt(nonce, ct, None)
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 3 or sys.argv[1] not in ("encrypt", "decrypt"):
         print("usage: python -m app.core.crypto <encrypt|decrypt> <value>")

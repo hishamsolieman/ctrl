@@ -19,6 +19,28 @@ export function resolveInvoiceLanguage(setting, uiLang) {
   return uiLang === "ar" ? "ar" : "en";
 }
 
+export async function getBackupInfo() {
+  const { data } = await api.get("/settings/backup");
+  return data;
+}
+
+export async function getBackupStatus() {
+  const { data } = await api.get("/settings/backup/status");
+  return data;
+}
+
+export async function backupNow() {
+  const { data } = await api.post("/settings/backup/now");
+  return data;
+}
+
+export async function restoreBackup(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/settings/backup/restore", form);
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // Print profiles + assignments API (Admin+ enforced server-side)
 // ---------------------------------------------------------------------------
